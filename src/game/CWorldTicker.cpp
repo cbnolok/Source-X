@@ -16,8 +16,8 @@ CWorldTicker::CWorldTicker(CWorldClock *pClock)
 
     _iLastTickDone = 0;
 
-    _vecObjs.reserve(50);
-    _vecWorldObjsToEraseFromList.reserve(50);
+    _vecGenericObjsToTick.reserve(50);
+    _vecWorldObjsEraseRequested.reserve(50);
     _vecPeriodicCharsToEraseFromList.reserve(25);
 }
 
@@ -26,7 +26,17 @@ CWorldTicker::CWorldTicker(CWorldClock *pClock)
 
 void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimedObject)
 {
+    ASSERT(pTimedObject);
     ASSERT(iTimeout != 0);
+
+    const TickingTimedObjEntry entryToAdd(iTimeout, pTimedObject);
+    const auto itFound = std::find(
+        _vecWorldObjsAddRequested.begin(),
+        _vecWorldObjsAddRequested.end(),
+        entryToAdd
+        );
+    if (_vecWorldObjsAddRequested.end() != itFound)
+        return; // Already requested the addition.
 
 /*
 #ifdef _DEBUG
@@ -43,7 +53,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 #if MT_ENGINES
     std::unique_lock<std::shared_mutex> lock(_mWorldTickList.MT_CMUTEX);
 #endif
-    _mWorldTickList.emplace(iTimeout, pTimedObject);
+    _vecWorldObjsAddRequested.emplace_back(std::move(entryToAdd));
 }
 
 void CWorldTicker::_RemoveTimedObject(const int64 iOldTimeout, CTimedObject* pTimedObject)
@@ -54,24 +64,22 @@ void CWorldTicker::_RemoveTimedObject(const int64 iOldTimeout, CTimedObject* pTi
 #if MT_ENGINES
     std::unique_lock<std::shared_mutex> lock(_mWorldTickList.MT_CMUTEX);
 #endif
-    const auto itMap = _mWorldTickList.equal_range(iOldTimeout);
-    decltype(_mWorldTickList)::const_iterator itFound = itMap.second;  // first element greater than the key we look for
-    for (auto it = itMap.first; it != itMap.second; ++it)
-    {
-        // I have a pair of iterators for a range of the elements (all the elements with the same key)
-        if (it->second == pTimedObject)
-        {
-            if (itFound != itMap.second)
-            {
-                g_Log.EventDebug("The same TimedObject is inserted multiple times in mWorldTickList. This shouldn't happen. Removing only the first one.\n");
-            }
-            itFound = it;
-#if !defined(_DEBUG)
-            break;
-#endif
-        }
-    }
-    if (itFound == itMap.second)
+    const TickingTimedObjEntry entryToRemove(iOldTimeout, pTimedObject);
+    const auto itRemoveFound = std::find(
+        _vecWorldObjsEraseRequested.begin(),
+        _vecWorldObjsEraseRequested.end(),
+        entryToRemove
+        );
+    if (_vecWorldObjsEraseRequested.end() != itRemoveFound)
+        return; // Already requested the removal.
+
+    // Check if it's in the ticking list.
+    const auto itTickList = std::find(
+        _mWorldTickList.begin(),
+        _mWorldTickList.end(),
+         TickingTimedObjEntry(iOldTimeout, pTimedObject)
+        );
+    if (itTickList == _mWorldTickList.end())
     {
         // Not found. The object might have a timeout while being in a non-tickable state, so it isn't in the list.
 /*
@@ -79,7 +87,6 @@ void CWorldTicker::_RemoveTimedObject(const int64 iOldTimeout, CTimedObject* pTi
         g_Log.EventDebug("Requested erasure of TimedObject in mWorldTickList, but it wasn't found.\n");
 #endif
 */
-
 /*
 #ifdef _DEBUG
         for (auto& elemList : _mWorldTickList)
@@ -93,7 +100,8 @@ void CWorldTicker::_RemoveTimedObject(const int64 iOldTimeout, CTimedObject* pTi
 */
         return;
     }
-    _mWorldTickList.erase(itFound);
+
+    _vecWorldObjsEraseRequested.emplace_back(std::move(entryToRemove));
 }
 
 void CWorldTicker::AddTimedObject(const int64 iTimeout, CTimedObject* pTimedObject, bool fForce)
@@ -163,45 +171,55 @@ void CWorldTicker::DelTimedObject(CTimedObject* pTimedObject)
 
 void CWorldTicker::_InsertCharTicking(const int64 iTickNext, CChar* pChar)
 {
+    ASSERT(iTickNext != 0);
+    ASSERT(pChar);
+
 #if MT_ENGINES
     std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
 
-    _mCharTickList.emplace(iTickNext, pChar);
+    const TickingCharEntry entryToAdd(iTickNext, pChar);
+    const auto itFound = std::find(
+        _vecPeriodicCharsToAddToList.begin(),
+        _vecPeriodicCharsToAddToList.end(),
+        entryToAdd
+        );
+    if (_vecPeriodicCharsToAddToList.end() != itFound)
+        return; // Already requested the addition.
+
+    _vecPeriodicCharsToAddToList.emplace_back(std::move(entryToAdd));
     pChar->_iTimePeriodicTick = iTickNext;
 }
 
 void CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
 {
+    ASSERT(iOldTimeout != 0);
+    ASSERT(pChar);
+
     // I'm reasonably sure that the element i'm trying to remove is present in this container.
 #if MT_ENGINES
     std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
 
-    const auto itMap = _mCharTickList.equal_range(iOldTimeout);
-    decltype(_mCharTickList)::const_iterator itFound = itMap.second;  // first element greater than the key we look for
-    for (auto it = itMap.first; it != itMap.second; ++it)
-    {
-        // I have a pair of iterators for a range of the elements (all the elements with the same key)
-        if (it->second == pChar)
-        {
-            if (itFound != itMap.second)
-            {
-                g_Log.EventDebug("The same CChar is inserted multiple times in mCharTickList. This shouldn't happen. Removing only the first one.\n");
-            }
-            itFound = it;
-#if !_DEBUG
-            break;
-#endif
-        }
-    }
-    if (itFound == itMap.second)
-    {
+    const TickingCharEntry entryToRemove(iOldTimeout, pChar);
+    const auto itRemoveFound = std::find(
+        _vecPeriodicCharsToAddToList.begin(),
+        _vecPeriodicCharsToAddToList.end(),
+        entryToRemove
+        );
+    if (_vecPeriodicCharsToAddToList.end() != itRemoveFound)
+        return; // Already requested the removal.
+
+    // Check if it's in the ticking list.
+    const auto itTickList = std::find(
+        _vecPeriodicCharsToAddToList.begin(),
+        _vecPeriodicCharsToAddToList.end(),
+        TickingCharEntry(iOldTimeout, pChar)
+        );
+    if (itTickList == _vecPeriodicCharsToAddToList.end())
         return;
-    }
-    _mCharTickList.erase(itFound);
 
-
+    _vecPeriodicCharsToAddToList.emplace_back(std::move(entryToRemove));
     pChar->_iTimePeriodicTick = 0;
 }
 
@@ -297,13 +315,15 @@ void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
 void CWorldTicker::AddObjStatusUpdate(CObjBase* pObj, bool fNeedsLock) // static
 {
     EXC_TRY("AddObjStatusUpdate");
+    const ProfileTask timersTask(PROFILE_TIMERS);
 
     UnreferencedParameter(fNeedsLock);
     {
 #if MT_ENGINES
         std::unique_lock<std::shared_mutex> lock(_ObjStatusUpdates.MT_CMUTEX);
 #endif
-        _ObjStatusUpdates.insert(pObj);
+        //_ObjStatusUpdates.insert(pObj);
+        _ObjStatusUpdates.emplace_back(pObj);
     }
 
     EXC_CATCH;
@@ -312,20 +332,227 @@ void CWorldTicker::AddObjStatusUpdate(CObjBase* pObj, bool fNeedsLock) // static
 void CWorldTicker::DelObjStatusUpdate(CObjBase* pObj, bool fNeedsLock) // static
 {
     EXC_TRY("DelObjStatusUpdate");
+    const ProfileTask timersTask(PROFILE_TIMERS);
 
     UnreferencedParameter(fNeedsLock);
     {
 #if MT_ENGINES
         std::unique_lock<std::shared_mutex> lock(_ObjStatusUpdates.MT_CMUTEX);
 #endif
-        _ObjStatusUpdates.erase(pObj);
+        //_ObjStatusUpdates.erase(pObj);
+        _vecObjStatusUpdateEraseRequested.emplace_back(pObj);
     }
 
     EXC_CATCH;
 }
 
-// Check timeouts and do ticks
+template <typename T>
+static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std::vector<size_t>& vecIndicesToRemove)
+{
+    // Erase in chunks, call erase the least times possible.
+    if (vecIndicesToRemove.empty())
+        return;
 
+    DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
+    DEBUG_ASSERT(std::is_sorted(vecIndicesToRemove.begin(), vecIndicesToRemove.end()));
+    // Check that those sorted vectors do not have duplicated values.
+    DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
+    DEBUG_ASSERT(std::adjacent_find(vecIndicesToRemove.begin(), vecIndicesToRemove.end()) == vecIndicesToRemove.end());
+
+    // Iterate through vecIndicesToRemove in reverse order for efficient removal
+    auto first = vecIndicesToRemove.rbegin();
+    auto last = first;
+
+    while (first != vecIndicesToRemove.rend())
+    {
+        // Find contiguous block
+        last = first;
+
+        // Ensure we do not access past the end of the range
+        const auto first_next = std::next(first);
+        while ((first != vecIndicesToRemove.rend()) && (first_next != vecIndicesToRemove.rend()) && (*first == *first_next + 1))
+        {
+            ++first;
+        }
+
+        // Remove contiguous block (convert reverse iterator to forward iterator)
+        vecMain.erase(vecMain.begin() + *first, vecMain.begin() + *last + 1);
+
+        if (first != vecIndicesToRemove.rend())
+        {
+            ++first;
+        }
+    }
+
+    /*
+    // Alternative implementation:
+    // We cannot use a vector with the indices but we need a vector with a copy of the elements to remove.
+    // std::remove_if in itself is more efficient than multiple erase calls, because the number of the element shifts is lesser.
+    // Though, we need to consider the memory overhead of reading through an std::pair of two types, which is bigger than just an index.
+    // Also, jumping across the vector in a non-contiguous way with the binary search can add additional memory overhead by itself, and
+    //   this will be greater the bigger are the elements in the vector..
+    // The bottom line is that we need to run some benchmarks between the two algorithms, and possibly also for two versions of this algorithm,
+    //   one using binary search and another with linear search.
+    // The latter might actually be faster for a small number of elements, since it's more predictable for the prefetcher.
+
+    // Use std::remove_if to shift elements not marked for removal to the front
+    auto it = std::remove_if(vecMain.begin(), vecMain.end(),
+        [&](const T& element) {
+            // Check if the current element is in the valuesToRemove vector using binary search
+            return std::binary_search(valuesToRemove.begin(), valuesToRemove.end(), element);
+        });
+
+    // Erase the removed elements in one go
+    vecMain.erase(it, vecMain.end());
+    */
+}
+
+template <typename T>
+static bool unsortedVecHasUniqueValues(const std::vector<T>& vec) noexcept {
+    for (size_t i = 0; i < vec.size(); ++i) {
+        for (size_t j = i + 1; j < vec.size(); ++j) {
+            if (vec[i] == vec[j]) {
+                return false; // Found a duplicate
+            }
+        }
+    }
+    return true; // No duplicates found
+}
+
+template <typename T>
+static void unsortedVecRemoveElementsByValues(std::vector<T>& vecMain, const std::vector<T> & vecValuesToRemove)
+{
+    if (vecValuesToRemove.empty())
+        return;
+
+    DEBUG_ASSERT(unsortedVecHasUniqueValues(vecMain));
+    //DEBUG_ASSERT(unsortedVecHasUniqueValues(vecValuesToRemove));  // We can live with duplicate values in here.
+
+    // Sort valuesToRemove for binary search
+    //std::sort(vecValuesToRemove.begin(), vecValuesToRemove.end());
+
+    // Use std::remove_if to shift elements not marked for removal to the front
+    auto it = std::remove_if(vecMain.begin(), vecMain.end(),
+        [&](const T& element) {
+            // Use binary search to check if the element should be removed
+            //return std::binary_search(vecValuesToRemove.begin(), vecValuesToRemove.end(), element);
+            return std::find(vecValuesToRemove.begin(), vecValuesToRemove.end(), element) != vecValuesToRemove.end();
+        });
+
+    // Erase the removed elements in one go
+    vecMain.erase(it, vecMain.end());
+}
+
+
+/*
+// To be tested and benchmarked.
+template <typename T>
+static void sortedVecRemoveElementsByValues(std::vector<T>& vecMain, const std::vector<T>& toRemove)
+{
+    if (toRemove.empty() || vecMain.empty())
+        return;
+
+    auto mainIt = vecMain.begin();
+    auto removeIt = toRemove.begin();
+
+    // Destination pointer for in-place shifting
+    auto destIt = mainIt;
+
+    while (mainIt != vecMain.end() && removeIt != toRemove.end()) {
+        // Skip over elements in the main vector that are smaller than the current element to remove
+        auto nextRangeEnd = std::lower_bound(mainIt, vecMain.end(), *removeIt);
+
+        // Batch copy the range of elements not marked for removal
+        std::move(mainIt, nextRangeEnd, destIt);
+        destIt += std::distance(mainIt, nextRangeEnd);
+
+        // Advance main iterator and remove iterator
+        mainIt = nextRangeEnd;
+
+        // Skip the elements that need to be removed
+        if (mainIt != vecMain.end() && *mainIt == *removeIt) {
+            ++mainIt;
+            ++removeIt;
+        }
+    }
+
+    // Copy the remaining elements if there are any left
+    std::move(mainIt, vecMain.end(), destIt);
+
+    // Resize the vector to remove the now extraneous elements at the end
+    vecMain.resize(destIt - vecMain.begin());
+}
+*/
+
+template <typename T>
+static void sortedVecRemoveAddQueued(
+    std::vector<T> &vecMain, std::vector<T> &vecToRemove, std::vector<T> &vecToAdd, std::vector<T> &vecElemBuffer
+    )
+{
+    DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
+    // Check that vecMain sorted vector does not have duplicated values.
+    DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
+
+    //EXC_TRY("vecRemoveAddQueued");
+    //EXC_SET_BLOCK("Sort intermediate lists");
+    std::sort(vecToAdd.begin(), vecToAdd.end());
+    std::sort(vecToRemove.begin(), vecToRemove.end());
+
+    /*
+            EXC_SET_BLOCK("Check that we do not have duplicates");
+            {
+                auto it = std::unique(_vecWorldObjsToAddToList.begin(), _vecWorldObjsToAddToList.end());
+                ASSERT(it == _vecWorldObjsToAddToList.end());
+            }
+            {
+                auto it = std::unique(_vecWorldObjsToEraseFromList.begin(), _vecWorldObjsToEraseFromList.end());
+                ASSERT(it == _vecWorldObjsToEraseFromList.end());
+            }
+            {
+                auto it = std::unique(_mWorldTickList.begin(), _mWorldTickList.end());
+                ASSERT(it == _mWorldTickList.end());
+            }
+            */
+
+    //EXC_SET_BLOCK("Ordered remove");
+    if (!vecToRemove.empty())
+    {
+        // TODO: test and benchmark if the approach of the above function (sortedVecRemoveElementsInPlace) might be faster.
+        vecElemBuffer.clear();
+        vecElemBuffer.reserve(vecMain.size() / 2);
+        std::set_difference(
+            vecMain.begin(), vecMain.end(),
+            vecToRemove.begin(), vecToRemove.end(),
+            std::back_inserter(vecElemBuffer)
+            );
+        //vecMain.swap(vecElemBuffer);
+        //static_cast<std::vector<T>&>(vecMain) = std::move(vecElemBuffer);
+        vecMain = std::move(vecElemBuffer);
+        vecToRemove.clear();
+        vecElemBuffer.clear();
+    }
+
+    //EXC_SET_BLOCK("Mergesort");
+    if (!vecToAdd.empty())
+    {
+        vecElemBuffer.clear();
+        vecMain.reserve(vecMain.size() + vecToAdd.size());
+        std::merge(
+            vecMain.begin(), vecMain.end(),
+            vecToAdd.begin(), vecToAdd.end(),
+            std::back_inserter(vecElemBuffer)
+            );
+        //vecMain.swap(vecElemBuffer);
+        vecMain = std::move(vecElemBuffer);
+        vecToAdd.clear();
+        vecElemBuffer.clear();
+    }
+
+    //EXC_CATCH:
+}
+
+
+// Check timeouts and do ticks
 void CWorldTicker::Tick()
 {
     ADDTOCALLSTACK("CWorldTicker::Tick");
@@ -346,32 +573,40 @@ void CWorldTicker::Tick()
         * TODO: implement a new class inheriting from CTimedObject to get rid of this code?
         */
         {
-            EXC_TRYSUB("StatusUpdates");
             {
-                EXC_SETSUB_BLOCK("Selection");
 #if MT_ENGINES
                 std::unique_lock<std::shared_mutex> lock_su(_ObjStatusUpdates.MT_CMUTEX);
 #endif
+                EXC_TRYSUB("StatusUpdates");
+                EXC_SETSUB_BLOCK("Remove requested");
+                unsortedVecRemoveElementsByValues(_ObjStatusUpdates, _vecObjStatusUpdateEraseRequested);
+
+                EXC_SETSUB_BLOCK("Selection");
                 if (!_ObjStatusUpdates.empty())
                 {
                     for (CObjBase* pObj : _ObjStatusUpdates)
                     {
                         if (pObj && !pObj->_IsBeingDeleted())
-                            _vecObjs.emplace_back(static_cast<void*>(pObj));
+                            _vecGenericObjsToTick.emplace_back(static_cast<void*>(pObj));
                     }
-                    _ObjStatusUpdates.clear();
                 }
+                EXC_CATCHSUB("");
+                //EXC_DEBUGSUB_START;
+                //EXC_DEBUGSUB_END;
+                _ObjStatusUpdates.clear();
+                _vecObjStatusUpdateEraseRequested.clear();
             }
 
+            EXC_TRYSUB("StatusUpdates");
             EXC_SETSUB_BLOCK("Loop");
-            for (void* pObjVoid : _vecObjs)
+            for (void* pObjVoid : _vecGenericObjsToTick)
             {
                 CObjBase* pObj = static_cast<CObjBase*>(pObjVoid);
                 pObj->OnTickStatusUpdate();
             }
             EXC_CATCHSUB("");
 
-            _vecObjs.clear();
+            _vecGenericObjsToTick.clear();
         }
     }
 
@@ -381,175 +616,77 @@ void CWorldTicker::Tick()
     // Items, Chars ... Everything relying on CTimedObject (excepting CObjBase, which inheritance is only virtual)
     int64 iCurTime = CWorldGameTime::GetCurrentTime().GetTimeRaw();    // Current timestamp, a few msecs will advance in the current tick ... avoid them until the following tick(s).
 
-    EXC_SET_BLOCK("TimedObjects");
     {
+        // Need this new scope to give the right lifetime to ProfileTask.
+        EXC_SET_BLOCK("TimedObjects");
         const ProfileTask timersTask(PROFILE_TIMERS);
         {
-            // Need here a new, inner scope to get rid of EXC_TRYSUB variables and for the unique_lock
-            EXC_TRYSUB("Timed Objects Selection");
+            // Need here another scope to give the right lifetime to the unique_lock.
 #if MT_ENGINES
             std::unique_lock<std::shared_mutex> lock(_mWorldTickList.MT_CMUTEX);
 #endif
-
-            WorldTickList::iterator itMap = _mWorldTickList.begin();
-            WorldTickList::iterator itMapEnd = _mWorldTickList.end();
-
-            size_t uiProgressive = 0;
-            int64 iTime;
-            while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
             {
-                CTimedObject* pTimedObj = itMap->second;
-                if (pTimedObj->_IsTimerSet() && pTimedObj->_CanTick())
-                {
-                    if (pTimedObj->_GetTimeoutRaw() <= iCurTime)
-                    {
-                        if (auto pObjBase = dynamic_cast<const CObjBase*>(pTimedObj))
-                        {
-                            if (pObjBase->_IsBeingDeleted())
-                                continue;
-                        }
-
-                        _vecObjs.emplace_back(static_cast<void*>(pTimedObj));
-                        _vecWorldObjsToEraseFromList.emplace_back(uiProgressive);
-
-                        pTimedObj->_ClearTimeout();
-                    }
-                    //else
-                    //{
-                    //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
-                    //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
-                    //}
-                }
-                ++itMap;
-                ++uiProgressive;
+                // New requests done during the world loop.
+                EXC_TRYSUB("Update main list");
+                sortedVecRemoveAddQueued(_mWorldTickList, _vecWorldObjsEraseRequested, _vecWorldObjsAddRequested, _vecWorldObjsElementBuffer);
+                EXC_CATCHSUB("");
             }
 
-            EXC_CATCHSUB("AddToSubLists");
-        }
-
-        {
-            EXC_TRYSUB("Timed Objects Delete from List");
-
-            // Erase in chunks, call erase the least times possible.
-            if (!_vecWorldObjsToEraseFromList.empty())
+            // Need here a new, inner scope to get rid of EXC_TRYSUB variables
             {
-                /*
-                g_Log.EventDebug("-- Start WORLDTICK. I need to remove %lu items:\n", _vecWorldObjsToEraseFromList.size());
-                std::stringstream ss;
-                for (size_t elem : _vecWorldObjsToEraseFromList)
-                {
-                    ss << elem << ' ';
-                }
-                g_Log.EventDebug("%s\n", ss.str().c_str());
-                */
+                EXC_TRYSUB("Selection");
+                _vecIndexMiscBuffer.clear();
+                WorldTickList::iterator itMap = _mWorldTickList.begin();
+                WorldTickList::iterator itMapEnd = _mWorldTickList.end();
 
-                if (_vecWorldObjsToEraseFromList.size() > 1)
+                size_t uiProgressive = 0;
+                int64 iTime;
+                while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
                 {
-                    size_t uiCurMapElemIdx = 0;
-                    size_t uiCurVecElemIdx = 0;
-                    //size_t uiSubRangeStartIdx = 0;
-                    WorldTickList::iterator itSubRangeStart = _mWorldTickList.begin();
-                    WorldTickList::iterator itMap = _mWorldTickList.begin();
-                    bool fContiguous = true;
-                    bool fFirstMatch = false;
-                    while ((itMap != _mWorldTickList.end()) &&
-                        (uiCurMapElemIdx <= _vecWorldObjsToEraseFromList.back()) &&
-                        (uiCurVecElemIdx < _vecWorldObjsToEraseFromList.size()))
+                    CTimedObject* pTimedObj = itMap->second;
+                    if (pTimedObj->_IsTimerSet() && pTimedObj->_CanTick())
                     {
-                        if (!fFirstMatch)
+                        if (pTimedObj->_GetTimeoutRaw() <= iCurTime)
                         {
-                            if (uiCurMapElemIdx == _vecWorldObjsToEraseFromList[uiCurVecElemIdx])
+                            if (auto pObjBase = dynamic_cast<const CObjBase*>(pTimedObj))
                             {
-                                //uiSubRangeStartIdx = uiCurMapElemIdx;
-                                itSubRangeStart = itMap;
-                                fFirstMatch = true;
-
-                                ++uiCurVecElemIdx;
+                                if (pObjBase->_IsBeingDeleted())
+                                    continue;
                             }
 
-                            ++itMap;
-                            ++uiCurMapElemIdx;
-                            continue;
+                            _vecGenericObjsToTick.emplace_back(static_cast<void*>(pTimedObj));
+                            _vecIndexMiscBuffer.emplace_back(uiProgressive);
+
+                            pTimedObj->_ClearTimeout();
                         }
-
-                        if (uiCurMapElemIdx == _vecWorldObjsToEraseFromList[uiCurVecElemIdx])
-                        {
-                            // Matches. I want to delete this.
-                            if (uiCurMapElemIdx == _vecWorldObjsToEraseFromList[uiCurVecElemIdx - 1] + 1)
-                            {
-                                // I want to delete it and it's contiguous, go on
-                                ASSERT(fContiguous);
-                            }
-                            else
-                            {
-                                // It isn't contiguous. Go below.
-                                ASSERT(!fContiguous);
-                                // This is the first one that matches after previous mismatches. We start this chunk from here.
-                                //uiSubRangeStartIdx = uiCurMapElemIdx;
-                                fContiguous = true;
-                            }
-
-                            ++itMap;
-                            ++uiCurMapElemIdx;
-                            ++uiCurVecElemIdx;
-                            continue;
-                        }
-
-                        // Not contiguous to the next element to be erased (stored in the vector).
-                        //  What to do?
-                        if (uiCurMapElemIdx != _vecWorldObjsToEraseFromList[uiCurVecElemIdx])
-                        {
-                            // I don't want to erase this.
-                            if (!fContiguous)
-                            {
-                                // This is an element after the first one successive to the previous contiguous block (2nd, 3rd...)
-                                // Ignore it.
-                                //g_Log.EventDebug("Skip this %lu\n", uiCurMapElemIdx);
-                                ++itMap;
-                            }
-                            else
-                            {
-                                // This is the first element after the previous contiguous block
-                                // I want to erase until the previous one
-                                // erase doesn't delete the last element in the range
-                                itMap = _mWorldTickList.erase(itSubRangeStart, itMap);
-                                //g_Log.EventDebug("Skip this %lu, not to be deleted, and...\n", uiCurMapElemIdx);
-                                //g_Log.EventDebug("Erasing %lu items starting from pos %lu\n", (uiCurMapElemIdx - uiSubRangeStartIdx), uiSubRangeStartIdx);
-
-                                ++itMap;
-                                itSubRangeStart = itMap;
-                                //uiSubRangeStartIdx = uiCurMapElemIdx;   // Not really needed
-                                fContiguous = false;
-                            }
-                            ++uiCurMapElemIdx;
-                            continue;
-                        }
-
-                       ASSERT(false);   // Shouldn't really be here.
+                        //else
+                        //{
+                        //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
+                        //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
+                        //}
                     }
-                    if (fFirstMatch && fContiguous)
-                    {
-                        /*itMap =*/ _mWorldTickList.erase(itSubRangeStart, itMap); // last range to erase
-                        //g_Log.EventDebug("(End cycle) Erasing %lu items starting from pos %lu\n", (uiCurMapElemIdx - uiSubRangeStartIdx), uiSubRangeStartIdx);
-                    }
+                    ++itMap;
+                    ++uiProgressive;
                 }
-                else
-                {
-                    _mWorldTickList.erase(std::next(_mWorldTickList.begin(), _vecWorldObjsToEraseFromList.front()));
-                    //g_Log.EventDebug("Erasing 1 item.\n");
-                }
+                EXC_CATCHSUB("");
             }
 
-            EXC_CATCHSUB("DeleteFromList");
-            _vecWorldObjsToEraseFromList.clear();
+            {
+                EXC_TRYSUB("Delete from List");
+                sortedVecRemoveElementsByIndices(_mWorldTickList, _vecIndexMiscBuffer);
+                EXC_CATCHSUB("");
+            }
+
+            _vecIndexMiscBuffer.clear();
+            // Done working with _mWorldTickList, we don't need the lock from now on.
         }
 
         lpctstr ptcSubDesc;
-        for (void* pObjVoid : _vecObjs)    // Loop through all msecs stored, unless we passed the timestamp.
+        for (void* pObjVoid : _vecGenericObjsToTick)    // Loop through all msecs stored, unless we passed the timestamp.
         {
             ptcSubDesc = "Generic";
 
-            EXC_TRYSUB("Timed Object Tick");
+            EXC_TRYSUB("Tick");
             EXC_SETSUB_BLOCK("Elapsed");
 
             CTimedObject* pTimedObj = static_cast<CTimedObject*>(pObjVoid);
@@ -657,177 +794,79 @@ void CWorldTicker::Tick()
 
             EXC_CATCHSUB(ptcSubDesc);
         }
+
     }
 
-    _vecObjs.clear();
+    _vecGenericObjsToTick.clear();
 
     // ----
 
     /* Periodic, automatic ticking for every char */
 
+    // No need another scope here to encapsulate this ProfileTask, because from now on, to the end of this method,
+    //  everything we do is related to char-only stuff.
+    EXC_SET_BLOCK("Char Periodic Ticks");
     const ProfileTask taskChars(PROFILE_CHARS);
-
     {
-        // Need here a new, inner scope to get rid of EXC_TRYSUB variables, and for the unique_lock
-        EXC_TRYSUB("Char Periodic Ticks Selection");
+        // Need here another scope to give the right lifetime to the unique_lock.
 #if MT_ENGINES
         std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
-
-        CharTickList::iterator itMap       = _mCharTickList.begin();
-        CharTickList::iterator itMapEnd    = _mCharTickList.end();
-
-        size_t uiProgressive = 0;
-        int64 iTime;
-        while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
         {
-            CChar* pChar = itMap->second;
-
-            if ((pChar->_iTimePeriodicTick != 0) && pChar->_CanTick() && !pChar->_IsBeingDeleted())
-            {
-                if (pChar->_iTimePeriodicTick <= iCurTime)
-                {
-                    _vecObjs.emplace_back(static_cast<void*>(pChar));
-                    _vecPeriodicCharsToEraseFromList.emplace_back(uiProgressive);
-
-                    pChar->_iTimePeriodicTick = 0;
-                }
-                //else
-                //{
-                //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
-                //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
-                //}
-
-            }
-            ++itMap;
-            ++uiProgressive;
+            // New requests done during the world loop.
+            EXC_TRYSUB("Update main list");
+            sortedVecRemoveAddQueued(_mCharTickList, _vecPeriodicCharsToEraseFromList, _vecPeriodicCharsToAddToList, _vecPeriodicCharsElementBuffer);
+            EXC_CATCHSUB("");
         }
 
-        EXC_CATCHSUB("");
-    }
+        {
+            EXC_TRYSUB("Selection");
+            CharTickList::iterator itMap       = _mCharTickList.begin();
+            CharTickList::iterator itMapEnd    = _mCharTickList.end();
 
-    {
-        EXC_TRYSUB("Periodic Chars Delete from List");
-//#if MT_ENGINES
-//        std::unique_lock<std::shared_mutex> lockTimeObj(pTimedObj->MT_CMUTEX);
-//#endif
-            // Erase in chunks, call erase the least times possible.
-            if (!_vecPeriodicCharsToEraseFromList.empty())
+            size_t uiProgressive = 0;
+            int64 iTime;
+            while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
             {
-                /*
-                g_Log.EventDebug("-- Start CHARPERIODICTICK. I need to remove %lu items:\n", _vecPeriodicCharsToEraseFromList.size());
-                std::stringstream ss;
-                for (size_t elem : _vecPeriodicCharsToEraseFromList)
-                {
-                    ss << elem << ' ';
-                }
-                g_Log.EventDebug("%s\n", ss.str().c_str());
-                */
+                CChar* pChar = itMap->second;
 
-                if (_vecPeriodicCharsToEraseFromList.size() > 1)
+                if ((pChar->_iTimePeriodicTick != 0) && pChar->_CanTick() && !pChar->_IsBeingDeleted())
                 {
-                    size_t uiCurMapElemIdx = 0;
-                    size_t uiCurVecElemIdx = 0;
-                   // size_t uiSubRangeStartIdx = 0;
-                    CharTickList::iterator itSubRangeStart = _mCharTickList.begin();
-                    CharTickList::iterator itMap = _mCharTickList.begin();
-                    bool fContiguous = true;
-                    bool fFirstMatch = false;
-                    while ((itMap != _mCharTickList.end()) &&
-                        (uiCurMapElemIdx <= _vecPeriodicCharsToEraseFromList.back()) &&
-                        (uiCurVecElemIdx < _vecPeriodicCharsToEraseFromList.size()))
+                    if (pChar->_iTimePeriodicTick <= iCurTime)
                     {
-                        if (!fFirstMatch)
-                        {
-                            if (uiCurMapElemIdx == _vecPeriodicCharsToEraseFromList[uiCurVecElemIdx])
-                            {
-                                //uiSubRangeStartIdx = uiCurMapElemIdx;
-                                itSubRangeStart = itMap;
-                                fFirstMatch = true;
+                        _vecGenericObjsToTick.emplace_back(static_cast<void*>(pChar));
+                        _vecIndexMiscBuffer.emplace_back(uiProgressive);
 
-                                ++uiCurVecElemIdx;
-                            }
-
-                            ++itMap;
-                            ++uiCurMapElemIdx;
-                            continue;
-                        }
-
-                        if (uiCurMapElemIdx == _vecPeriodicCharsToEraseFromList[uiCurVecElemIdx])
-                        {
-                            // Matches. I want to delete this.
-                            if (uiCurMapElemIdx == _vecPeriodicCharsToEraseFromList[uiCurVecElemIdx - 1] + 1)
-                            {
-                                // I want to delete it and it's contiguous, go on
-                                ASSERT(fContiguous);
-                            }
-                            else
-                            {
-                                // It isn't contiguous. Go below.
-                                ASSERT(!fContiguous);
-                                // This is the first one that matches after previous mismatches. We start this chunk from here.
-                                //uiSubRangeStartIdx = uiCurMapElemIdx;
-                                fContiguous = true;
-                            }
-
-                            ++itMap;
-                            ++uiCurMapElemIdx;
-                            ++uiCurVecElemIdx;
-                            continue;
-                        }
-
-                        // Not contiguous to the next element to be erased (stored in the vector).
-                        //  What to do?
-                        if (uiCurMapElemIdx != _vecPeriodicCharsToEraseFromList[uiCurVecElemIdx])
-                        {
-                            // I don't want to erase this.
-                            if (!fContiguous)
-                            {
-                                // This is an element after the first one successive to the previous contiguous block (2nd, 3rd...)
-                                // Ignore it.
-                                //g_Log.EventDebug("Skip this %lu\n", uiCurMapElemIdx);
-                                ++itMap;
-                            }
-                            else
-                            {
-                                // This is the first element after the previous contiguous block
-                                // I want to erase until the previous one
-                                // erase doesn't delete the last element in the range
-                                //g_Log.EventDebug("Skip this %lu, not to be deleted, and...\n", uiCurMapElemIdx);
-                                //g_Log.EventDebug("Erasing %lu items starting from pos %lu\n", (uiCurMapElemIdx - uiSubRangeStartIdx), uiSubRangeStartIdx);
-
-                                itMap = _mCharTickList.erase(itSubRangeStart, itMap);
-                                ++itMap;
-                                itSubRangeStart = itMap;
-                                //uiSubRangeStartIdx = uiCurMapElemIdx;   // Not really needed
-                                fContiguous = false;
-                            }
-                            ++uiCurMapElemIdx;
-                            continue;
-                        }
-
-                       ASSERT(false);   // Shouldn't really be here.
+                        pChar->_iTimePeriodicTick = 0;
                     }
-                    if (fFirstMatch && fContiguous)
-                    {
-                        /*itMap =*/ _mCharTickList.erase(itSubRangeStart, itMap); // last range to erase
-                        //g_Log.EventDebug("(End cycle) Erasing %lu items starting from pos %lu\n", (uiCurMapElemIdx - uiSubRangeStartIdx), uiSubRangeStartIdx);
-                    }
+                    //else
+                    //{
+                    //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
+                    //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
+                    //}
+
                 }
-                else
-                {
-                    _mCharTickList.erase(std::next(_mCharTickList.begin(), _vecPeriodicCharsToEraseFromList.front()));
-                    //g_Log.EventDebug("Erasing 1 item.\n");
-                }
+                ++itMap;
+                ++uiProgressive;
             }
+            EXC_CATCHSUB("");
+        }
 
-        EXC_CATCHSUB("DeleteFromList");
-        _vecPeriodicCharsToEraseFromList.clear();
+        {
+            EXC_TRYSUB("Delete from List");
+            // Erase in chunks, call erase the least times possible.
+            sortedVecRemoveElementsByIndices(_mCharTickList, _vecIndexMiscBuffer);
+            EXC_CATCHSUB("DeleteFromList");
+
+            _vecIndexMiscBuffer.clear();
+        }
+
+        // Done working with _mCharTickList, we don't need the lock from now on.
     }
 
     {
         EXC_TRYSUB("Char Periodic Ticks Loop");
-        for (void* pObjVoid : _vecObjs)    // Loop through all msecs stored, unless we passed the timestamp.
+        for (void* pObjVoid : _vecGenericObjsToTick)    // Loop through all msecs stored, unless we passed the timestamp.
         {
             CChar* pChar = static_cast<CChar*>(pObjVoid);
             if (pChar->OnTickPeriodic())
@@ -840,7 +879,8 @@ void CWorldTicker::Tick()
             }
         }
         EXC_CATCHSUB("");
-        _vecObjs.clear();
+
+        _vecGenericObjsToTick.clear();
     }
 
     EXC_CATCH;

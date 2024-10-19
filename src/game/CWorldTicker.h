@@ -8,7 +8,12 @@
 #include "CTimedFunctionHandler.h"
 #include "CTimedObject.h"
 
-/* Include phmap.h */
+/*
+ * #include <flat_containers/flat_set.hpp>
+*/
+
+/*
+//--- Include phmap.h
 #ifdef ADDRESS_SANITIZER
     #define MYASAN_
 #endif
@@ -36,20 +41,8 @@
 #ifdef __GNUC__
     #pragma GCC diagnostic pop
 #endif
-/* End of phmap.h inclusion */
-
-/* Include btree.h */
-#if NON_MSVC_COMPILER
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wzero-as-null-pointer-constant"
-#endif
-
-#include <parallel_hashmap/btree.h>
-
-#if NON_MSVC_COMPILER
-    #pragma GCC diagnostic pop
-#endif
-/* End of btree.h inclusion */
+//--- End of phmap.h inclusion
+*/
 
 
 class CObjBase;
@@ -64,18 +57,22 @@ public:
     ~CWorldTicker() = default;
 
 private:
-    struct WorldTickList : public phmap::btree_multimap<int64, CTimedObject*>
+    using TickingTimedObjEntry = std::pair<int64, CTimedObject*>;
+    struct WorldTickList : public std::vector<TickingTimedObjEntry>
     {
         MT_CMUTEX_DEF;
     };
 
-    struct CharTickList : public phmap::btree_multimap<int64, CChar*>
+    using TickingCharEntry = std::pair<int64, CChar*>;
+    struct CharTickList : public std::vector<TickingCharEntry>
     {
         MT_CMUTEX_DEF;
     };
 
-    struct StatusUpdatesList : public phmap::parallel_flat_hash_set<CObjBase*>
+    //struct StatusUpdatesList : public phmap::parallel_flat_hash_set<CObjBase*>
+    //struct StatusUpdatesList : public fc::flat_set<CObjBase*>
     //struct StatusUpdatesList : public std::unordered_set<CObjBase*>
+    struct StatusUpdatesList : public std::vector<CObjBase*>
     {
         MT_CMUTEX_DEF;
     };
@@ -85,13 +82,19 @@ private:
 
     friend class CWorldTickingList;
     StatusUpdatesList _ObjStatusUpdates;   // objects that need OnTickStatusUpdate called
+    std::vector<CObjBase*> _vecObjStatusUpdateEraseRequested;
 
     // Reuse the same container (using void pointers statically casted) to avoid unnecessary reallocations.
-    std::vector<void*> _vecObjs;
-    // "Index" in the multimap
-    std::vector<size_t> _vecWorldObjsToEraseFromList;
-    // "Index" in the multimap
-    std::vector<size_t> _vecPeriodicCharsToEraseFromList;
+    std::vector<void*> _vecGenericObjsToTick;
+    std::vector<size_t> _vecIndexMiscBuffer;
+
+    std::vector<TickingTimedObjEntry> _vecWorldObjsAddRequested;
+    std::vector<TickingTimedObjEntry> _vecWorldObjsEraseRequested;
+    std::vector<TickingTimedObjEntry> _vecWorldObjsElementBuffer;
+
+    std::vector<TickingCharEntry> _vecPeriodicCharsToAddToList;
+    std::vector<TickingCharEntry> _vecPeriodicCharsToEraseFromList;
+    std::vector<TickingCharEntry> _vecPeriodicCharsElementBuffer;
 
     //----
 
