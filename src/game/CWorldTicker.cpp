@@ -250,6 +250,19 @@ void CWorldTicker::_InsertCharTicking(const int64 iTickNext, CChar* pChar)
         return; // Already requested the addition.
     }
 
+    const auto itFoundEraseRequest = std::find(
+        _vecPeriodicCharsToEraseFromList.begin(),
+        _vecPeriodicCharsToEraseFromList.end(),
+        entryToAdd
+        );
+    if (_vecPeriodicCharsToEraseFromList.end() != itFoundEraseRequest)
+    {
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+        g_Log.EventDebug("[%p] WARN: Stopped insertion attempt of a CChar which removal from periodic ticking list has been requested!\n", (void*)pChar);
+#endif
+        return; // Already requested the addition.
+    }
+
     _vecPeriodicCharsToAddToList.emplace_back(std::move(entryToAdd));
     pChar->_iTimePeriodicTick = iTickNext;
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
@@ -298,7 +311,7 @@ void CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
     const auto itTickList = std::find(
         _mCharTickList.begin(),
         _mCharTickList.end(),
-        TickingCharEntry(iOldTimeout, pChar)
+        entryToRemove
         );
     if (itTickList == _mCharTickList.end())
     {
