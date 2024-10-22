@@ -9,7 +9,7 @@
 #include "CWorldTicker.h"
 
 #ifdef _DEBUG
-//#   define DEBUG_CTIMEDOBJ_TIMED_TICKING
+#   define DEBUG_CTIMEDOBJ_TIMED_TICKING
 #   define DEBUG_CCHAR_PERIODIC_TICKING
 //#   define DEBUG_STATUSUPDATES
 #   define DEBUG_LIST_OPS
@@ -408,6 +408,7 @@ void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
         // Adding an object already on the list? Am i setting a new timeout without deleting the previous one?
         EXC_SET_BLOCK("Remove");
         const bool fRet = _RemoveCharTicking(iTickOld, pChar);
+        UnreferencedParameter(fRet);
         DEBUG_ASSERT(fRet);
     }
 
