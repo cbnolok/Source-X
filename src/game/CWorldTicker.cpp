@@ -531,25 +531,33 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
     DEBUG_ASSERT(std::adjacent_find(vecIndicesToRemove.begin(), vecIndicesToRemove.end()) == vecIndicesToRemove.end());
 
-    // Iterate through vecIndicesToRemove in reverse order for efficient removal
-    auto first = vecIndicesToRemove.rbegin();
-    auto last = first;
+    // Reverse iterators for vecIndicesToRemove allow us to remove elements from the back of the vector
+    // towards the front, which prevents invalidating remaining indices when elements are removed.
+    auto first = vecIndicesToRemove.rbegin(); // Points to the last element in vecIndicesToRemove
+    auto last = first; // 'last' will mark the start of a contiguous block of indices to remove
 
     while (first != vecIndicesToRemove.rend())
     {
         // Find contiguous block
         last = first;
 
-        // Ensure we do not access past the end of the range
-        const auto first_next = std::next(first);
-        while ((first != vecIndicesToRemove.rend()) && (first_next != vecIndicesToRemove.rend()) && (*first == *first_next + 1))
+        // This inner loop identifies a contiguous block of indices to remove.
+        // A block is contiguous if the current index *first is exactly 1 greater than the next index.
+        auto first_next = first;
+        while (
+            (first != vecIndicesToRemove.rend()) &&         // Ensure first doesn't go out of bounds
+            (++first_next != vecIndicesToRemove.rend()) &&  // Ensure std::next(first) doesn't go out of bounds
+            (*first == *first_next + 1)                     // Check if the next index is 1 less than the current (contiguous)
+        )
         {
             ++first;
         }
 
-        // Remove contiguous block (convert reverse iterator to forward iterator)
+        // Once we find a contiguous block, we erase that block from vecMain.
+        // We calculate the range to erase by converting the reverse iterators to normal forward iterators.
         vecMain.erase(vecMain.begin() + *first, vecMain.begin() + *last + 1);
 
+        // Move to the next index to check. The above erase operation doesn't invalidate reverse iterators.
         if (first != vecIndicesToRemove.rend())
         {
             ++first;
