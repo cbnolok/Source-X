@@ -9,9 +9,10 @@
 #include "CWorldTicker.h"
 
 #ifdef _DEBUG
-#   define DEBUG_CTIMEDOBJ_TIMED_TICKING
+//#   define DEBUG_CTIMEDOBJ_TIMED_TICKING
 #   define DEBUG_CCHAR_PERIODIC_TICKING
-#   define DEBUG_STATUSUPDATES
+//#   define DEBUG_STATUSUPDATES
+#   define DEBUG_LIST_OPS
 //#   define BENCHMARK_LISTS // TODO
 #endif
 
@@ -210,8 +211,10 @@ void CWorldTicker::DelTimedObject(CTimedObject* pTimedObject)
                 return entry.second == pTimedObject;
             }
             );
-        if (itTickList != _mWorldTickList.end())
+        if (itTickList != _mWorldTickList.end()) {
             g_Log.EventDebug("[%p] WARN:   But i have found it in the list! With Timeout %" PRId64 ".\n", (void*)pTimedObject, itTickList->first);
+            ASSERT(false);
+        }
         else
             g_Log.EventDebug("[%p] WARN:   (rightfully) i haven't found it in the list.\n", (void*)pTimedObject);
 #endif
@@ -257,11 +260,31 @@ void CWorldTicker::_InsertCharTicking(const int64 iTickNext, CChar* pChar)
         );
     if (_vecPeriodicCharsToEraseFromList.end() != itFoundEraseRequest)
     {
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] WARN: Stopped insertion attempt of a CChar which removal from periodic ticking list has been requested!\n", (void*)pChar);
 #endif
         return; // Already requested the addition.
     }
+
+#ifdef _DEBUG
+    const auto itTickAddListOnlyChar = std::find_if(
+        _vecPeriodicCharsToAddToList.begin(),
+        _vecPeriodicCharsToAddToList.end(),
+        [pChar](const TickingCharEntry& entry) {
+            return entry.second == pChar;
+        }
+        );
+    ASSERT(_vecPeriodicCharsToAddToList.end() == itTickAddListOnlyChar);
+
+    const auto itTickListOnlyChar = std::find_if(
+        _mCharTickList.begin(),
+        _mCharTickList.end(),
+        [pChar](const TickingCharEntry& entry) {
+            return entry.second == pChar;
+        }
+        );
+    ASSERT(_mCharTickList.end() == itTickListOnlyChar);
+#endif
 
     _vecPeriodicCharsToAddToList.emplace_back(std::move(entryToAdd));
     pChar->_iTimePeriodicTick = iTickNext;
@@ -270,7 +293,7 @@ void CWorldTicker::_InsertCharTicking(const int64 iTickNext, CChar* pChar)
 #endif
 }
 
-void CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
+bool CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
 {
     ASSERT(iOldTimeout != 0);
     ASSERT(pChar);
@@ -291,9 +314,10 @@ void CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] WARN: Periodic char erasure from ticking list already requested.\n", (void*)pChar);
 #endif
-        return; // Already requested the removal.
+        return false; // Already requested the removal.
     }
 
+    bool fRemovedFromAddList = false;
     const auto itAddFound = std::find(
         _vecPeriodicCharsToAddToList.begin(),
         _vecPeriodicCharsToAddToList.end(),
@@ -301,10 +325,11 @@ void CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
         );
     if (_vecPeriodicCharsToAddToList.end() != itAddFound)
     {
+        fRemovedFromAddList = true;
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] INFO: Erasing char from periodic ticking list add buffer.\n", (void*)pChar);
 #endif
-        return; // Already requested the removal.
+        _vecPeriodicCharsToAddToList.erase(itAddFound);
     }
 
     // Check if it's in the ticking list.
@@ -313,27 +338,29 @@ void CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
         _mCharTickList.end(),
         entryToRemove
         );
-    if (itTickList == _mCharTickList.end())
+    if (itTickList == _mCharTickList.end() && !fRemovedFromAddList)
     {
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] WARN: Requested Periodic char erasure from ticking list, but not found.\n", (void*)pChar);
 #endif
-        return;
+        return false;
     }
+
+#ifdef _DEBUG
+    bool fRemovedFromTickList = (_vecPeriodicCharsToAddToList.end() == itAddFound);
+    ASSERT(fRemovedFromTickList || fRemovedFromAddList);
+#endif
 
     _vecPeriodicCharsToEraseFromList.emplace_back(std::move(entryToRemove));
     pChar->_iTimePeriodicTick = 0;
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
     g_Log.EventDebug("[%p] -STATUS: Done adding the CChar to the periodic ticking list remove buffer.\n", (void*)pChar);
 #endif
+    return true;
 }
 
 void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
 {
-#ifdef DEBUG_CCHAR_PERIODIC_TICKING
-    g_Log.EventDebug("[%p] --STATUS: Trying to add CChar to the periodic ticking list.\n", (void*)pChar);
-#endif
-
     EXC_TRY("AddCharTicking");
 
     const ProfileTask timersTask(PROFILE_TIMERS);
@@ -353,6 +380,11 @@ void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
         iTickOld = pChar->_iTimePeriodicTick;
     }
 
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+    g_Log.EventDebug("[%p] --STATUS: Trying to add CChar to the periodic ticking list. Tickold: %" PRId64 ". Ticknext: %" PRId64 ".\n",
+        (void*)pChar, iTickOld, iTickNext);
+#endif
+
     if (iTickNext == iTickOld)
     {
 /*
@@ -364,6 +396,7 @@ void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
         DEBUG_ASSERT(it == _mCharTickList.end());
 #endif
 */
+        g_Log.EventDebug("[%p] WARN: Stop, tickold == ticknext.\n", (void*)pChar);
         return;
     }
 
@@ -374,7 +407,8 @@ void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
     {
         // Adding an object already on the list? Am i setting a new timeout without deleting the previous one?
         EXC_SET_BLOCK("Remove");
-        _RemoveCharTicking(iTickOld, pChar);
+        const bool fRet = _RemoveCharTicking(iTickOld, pChar);
+        DEBUG_ASSERT(fRet);
     }
 
     EXC_SET_BLOCK("Insert");
@@ -385,10 +419,6 @@ void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
 
 void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
 {
-#ifdef DEBUG_CCHAR_PERIODIC_TICKING
-    g_Log.EventDebug("[%p] --STATUS: Trying to remove CChar from the periodic ticking list.\n", (void*)pChar);
-#endif
-
     EXC_TRY("DelCharTicking");
     const ProfileTask timersTask(PROFILE_TIMERS);
 
@@ -404,21 +434,45 @@ void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
     {
         iTickOld = pChar->_iTimePeriodicTick;
     }
+
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+    g_Log.EventDebug("[%p] --STATUS: Trying to remove CChar from the periodic ticking list. Tickold: %" PRId64 ".\n",
+        (void*)pChar, iTickOld);
+#endif
+
     if (iTickOld == 0)
     {
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] WARN: Requested deletion of Periodic char, but Timeout is 0, so it shouldn't be in the list.\n", (void*)pChar);
+        auto find_fn =
+            [pChar](const TickingCharEntry& entry) {
+                return entry.second == pChar;
+        };
+
+        const auto itTickRemoveList = std::find_if(
+            _vecPeriodicCharsToEraseFromList.begin(),
+            _vecPeriodicCharsToEraseFromList.end(),
+            find_fn
+            );
+        if (itTickRemoveList != _vecPeriodicCharsToEraseFromList.end())
+        {
+            g_Log.EventDebug("[%p] WARN:   though, found it in the removal list, so it's fine..\n", (void*)pChar);
+            return;
+        }
+
         const auto itTickList = std::find_if(
             _mCharTickList.begin(),
             _mCharTickList.end(),
-            [pChar](const TickingCharEntry& entry) {
-                return entry.second == pChar;
-            }
+            find_fn
             );
         if (itTickList != _mCharTickList.end())
+        {
             g_Log.EventDebug("[%p] WARN:   But i have found it in the list! With Timeout %" PRId64 ".\n", (void*)pChar, itTickList->first);
-        else
-            g_Log.EventDebug("[%p] WARN:   (rightfully) i haven't found it in the list.\n", (void*)pChar);
+            ASSERT(false);
+            return;
+        }
+
+        g_Log.EventDebug("[%p] WARN:   (rightfully) i haven't found it in any list.\n", (void*)pChar);
 #endif
         return;
     }
@@ -531,38 +585,58 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
     DEBUG_ASSERT(std::adjacent_find(vecIndicesToRemove.begin(), vecIndicesToRemove.end()) == vecIndicesToRemove.end());
 
+#ifdef DEBUG_LIST_OPS
+    g_Log.EventDebug("Starting sortedVecRemoveElementsByIndices.\n");
+    // Copy the original vector to check against later
+    std::vector<T> originalVecMain = vecMain;
+#endif
+
     // Reverse iterators for vecIndicesToRemove allow us to remove elements from the back of the vector
     // towards the front, which prevents invalidating remaining indices when elements are removed.
-    auto first = vecIndicesToRemove.rbegin(); // Points to the last element in vecIndicesToRemove
-    auto last = first; // 'last' will mark the start of a contiguous block of indices to remove
-
-    while (first != vecIndicesToRemove.rend())
+    auto itReverseRemoveFirst = vecIndicesToRemove.rbegin(); // Points to the last element in vecIndicesToRemove
+    while (itReverseRemoveFirst != vecIndicesToRemove.rend())
     {
         // Find contiguous block
-        last = first;
+        auto itReverseRemoveLast = itReverseRemoveFirst; // marks the end of a contiguous block of indices to remove.
 
         // This inner loop identifies a contiguous block of indices to remove.
         // A block is contiguous if the current index *first is exactly 1 greater than the next index.
-        auto first_next = first;
+        auto itReverseRemoveFirst_Next = itReverseRemoveFirst;
         while (
-            (first != vecIndicesToRemove.rend()) &&         // Ensure first doesn't go out of bounds
-            (++first_next != vecIndicesToRemove.rend()) &&  // Ensure std::next(first) doesn't go out of bounds
-            (*first == *first_next + 1)                     // Check if the next index is 1 less than the current (contiguous)
+            (++itReverseRemoveFirst_Next != vecIndicesToRemove.rend()) &&   // Ensure std::next(first) doesn't go out of bounds
+            (*itReverseRemoveFirst == *itReverseRemoveFirst_Next + 1)       // Check if the next index is 1 less than the current (contiguous)
         )
         {
-            ++first;
+            itReverseRemoveFirst = itReverseRemoveFirst_Next;
         }
 
         // Once we find a contiguous block, we erase that block from vecMain.
         // We calculate the range to erase by converting the reverse iterators to normal forward iterators.
-        vecMain.erase(vecMain.begin() + *first, vecMain.begin() + *last + 1);
+        auto itForwardRemoveBegin = vecMain.begin() + *itReverseRemoveFirst;
+        auto itForwardRemoveEnd = vecMain.begin() + *itReverseRemoveLast + 1;
+        vecMain.erase(itForwardRemoveBegin, itForwardRemoveEnd);
+
+#ifdef DEBUG_LIST_OPS
+        const size_t iRemoveFirst = std::distance(vecMain.begin(), itForwardRemoveBegin);
+        const size_t iRemoveLast  = std::distance(vecMain.begin(), itForwardRemoveEnd - 1);
+        g_Log.EventDebug("Removing contiguous indices: %" PRIuSIZE_T " to %" PRIuSIZE_T " (total sizes vecMain: %" PRIuSIZE_T ", vecIndices: %" PRIuSIZE_T ").\n",
+            iRemoveFirst, iRemoveLast, vecMain.size(), vecIndicesToRemove.size());
+#endif
 
         // Move to the next index to check. The above erase operation doesn't invalidate reverse iterators.
-        if (first != vecIndicesToRemove.rend())
+        if (itReverseRemoveFirst != vecIndicesToRemove.rend())
         {
-            ++first;
+            ++itReverseRemoveFirst;
         }
     }
+
+#ifdef DEBUG_LIST_OPS
+    // Sanity Check: Verify that the removed elements are no longer present in vecMain
+    for (auto index : vecIndicesToRemove) {
+        ASSERT(index < originalVecMain.size());
+        ASSERT(std::find(vecMain.begin(), vecMain.end(), originalVecMain[index]) == vecMain.end());
+    }
+#endif
 
     /*
     // Alternative implementation:
@@ -670,29 +744,15 @@ static void sortedVecRemoveAddQueued(
     )
 {
     DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
-    // Check that vecMain sorted vector does not have duplicated values.
-    DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
+    DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end()); // no duplicate values
 
     //EXC_TRY("vecRemoveAddQueued");
     //EXC_SET_BLOCK("Sort intermediate lists");
     std::sort(vecToAdd.begin(), vecToAdd.end());
     std::sort(vecToRemove.begin(), vecToRemove.end());
 
-    /*
-            EXC_SET_BLOCK("Check that we do not have duplicates");
-            {
-                auto it = std::unique(_vecWorldObjsToAddToList.begin(), _vecWorldObjsToAddToList.end());
-                ASSERT(it == _vecWorldObjsToAddToList.end());
-            }
-            {
-                auto it = std::unique(_vecWorldObjsToEraseFromList.begin(), _vecWorldObjsToEraseFromList.end());
-                ASSERT(it == _vecWorldObjsToEraseFromList.end());
-            }
-            {
-                auto it = std::unique(_mWorldTickList.begin(), _mWorldTickList.end());
-                ASSERT(it == _mWorldTickList.end());
-            }
-            */
+    DEBUG_ASSERT(std::adjacent_find(vecToAdd.begin(), vecToAdd.end()) == vecToAdd.end()); // no duplicate values
+    DEBUG_ASSERT(std::adjacent_find(vecToRemove.begin(), vecToRemove.end()) == vecToRemove.end()); // no duplicate values
 
     //EXC_SET_BLOCK("Ordered remove");
     if (!vecToRemove.empty())
@@ -1006,6 +1066,9 @@ void CWorldTicker::Tick()
 
         {
             EXC_TRYSUB("Selection");
+#ifdef _DEBUG
+            g_Log.EventDebug("Start looping through char periodic ticks.\n");
+#endif
             CharTickList::iterator itMap       = _mCharTickList.begin();
             CharTickList::iterator itMapEnd    = _mCharTickList.end();
 
@@ -1014,7 +1077,10 @@ void CWorldTicker::Tick()
             while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
             {
                 CChar* pChar = itMap->second;
-
+#ifdef _DEBUG
+                g_Log.EventDebug("Executing char periodic tick: %p. Registered time: %" PRId64 ". pChar->_iTimePeriodicTick: %" PRId64 "\n",
+                    (void*)pChar, itMap->first, pChar->_iTimePeriodicTick);
+#endif
                 if ((pChar->_iTimePeriodicTick != 0) && pChar->_CanTick() && !pChar->_IsBeingDeleted())
                 {
                     if (pChar->_iTimePeriodicTick <= iCurTime)
@@ -1035,6 +1101,10 @@ void CWorldTicker::Tick()
                 ++uiProgressive;
             }
             EXC_CATCHSUB("");
+
+#ifdef _DEBUG
+            g_Log.EventDebug("Done looping through char periodic ticks.\n");
+#endif
         }
 
         {

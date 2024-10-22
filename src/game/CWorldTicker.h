@@ -119,7 +119,7 @@ private:
     void _InsertTimedObject(const int64 iTimeout, CTimedObject* pTimedObject);
     void _RemoveTimedObject(const int64 iOldTimeout, CTimedObject* pTimedObject);
     void _InsertCharTicking(const int64 iTickNext, CChar* pChar);
-    void _RemoveCharTicking(const int64 iOldTimeout, CChar* pChar);
+    bool _RemoveCharTicking(const int64 iOldTimeout, CChar* pChar);
 };
 
 #endif // _INC_CWORLDTICKER_H
