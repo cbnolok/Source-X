@@ -580,6 +580,12 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     if (vecIndicesToRemove.empty())
         return;
 
+    if (vecMain.empty())
+    {
+        vecMain.clear();
+        return;
+    }
+
     DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
     DEBUG_ASSERT(std::is_sorted(vecIndicesToRemove.begin(), vecIndicesToRemove.end()));
     // Check that those sorted vectors do not have duplicated values.
@@ -592,43 +598,30 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     std::vector<T> originalVecMain = vecMain;
 #endif
 
-    // Reverse iterators for vecIndicesToRemove allow us to remove elements from the back of the vector
-    // towards the front, which prevents invalidating remaining indices when elements are removed.
-    auto itReverseRemoveFirst = vecIndicesToRemove.rbegin(); // Points to the last element in vecIndicesToRemove
-    while (itReverseRemoveFirst != vecIndicesToRemove.rend())
+    // Start from the end of vecIndicesToRemove, working backwards with normal iterators
+    auto itRemoveFirst = vecIndicesToRemove.end();  // Points one past the last element
+    while (itRemoveFirst != vecIndicesToRemove.begin())
     {
-        // Find contiguous block
-        auto itReverseRemoveLast = itReverseRemoveFirst; // marks the end of a contiguous block of indices to remove.
+        // Move the iterator back to point to a valid element.
+        --itRemoveFirst;
 
-        // This inner loop identifies a contiguous block of indices to remove.
-        // A block is contiguous if the current index *first is exactly 1 greater than the next index.
-        auto itReverseRemoveFirst_Next = itReverseRemoveFirst;
-        while (
-            (++itReverseRemoveFirst_Next != vecIndicesToRemove.rend()) &&   // Ensure std::next(first) doesn't go out of bounds
-            (*itReverseRemoveFirst == *itReverseRemoveFirst_Next + 1)       // Check if the next index is 1 less than the current (contiguous)
-        )
+        auto itRemoveLast = itRemoveFirst;  // Marks the start of a contiguous block
+        // Find contiguous block by working backwards and finding consecutive indices
+        // This loop identifies a contiguous block of indices to remove.
+        // A block is contiguous if the current index *itRemoveFirst is exactly 1 greater than the previous index.
+        while (itRemoveFirst != vecIndicesToRemove.begin() && *(itRemoveFirst - 1) + 1 == *itRemoveFirst)
         {
-            itReverseRemoveFirst = itReverseRemoveFirst_Next;
+            --itRemoveFirst;
         }
-
-        // Once we find a contiguous block, we erase that block from vecMain.
-        // We calculate the range to erase by converting the reverse iterators to normal forward iterators.
-        auto itForwardRemoveBegin = vecMain.begin() + *itReverseRemoveFirst;
-        auto itForwardRemoveEnd = vecMain.begin() + *itReverseRemoveLast + 1;
-        vecMain.erase(itForwardRemoveBegin, itForwardRemoveEnd);
 
 #ifdef DEBUG_LIST_OPS
-        const size_t iRemoveFirst = std::distance(vecMain.begin(), itForwardRemoveBegin);
-        const size_t iRemoveLast  = std::distance(vecMain.begin(), itForwardRemoveEnd - 1);
         g_Log.EventDebug("Removing contiguous indices: %" PRIuSIZE_T " to %" PRIuSIZE_T " (total sizes vecMain: %" PRIuSIZE_T ", vecIndices: %" PRIuSIZE_T ").\n",
-            iRemoveFirst, iRemoveLast, vecMain.size(), vecIndicesToRemove.size());
+            *itRemoveFirst, *itRemoveLast, vecMain.size(), vecIndicesToRemove.size());
 #endif
 
-        // Move to the next index to check. The above erase operation doesn't invalidate reverse iterators.
-        if (itReverseRemoveFirst != vecIndicesToRemove.rend())
-        {
-            ++itReverseRemoveFirst;
-        }
+        // Once we find a contiguous block, we erase that block from vecMain.
+        auto itRemoveLastPast = (*itRemoveLast == vecMain.size() - 1) ? vecMain.end() : vecMain.begin() + *itRemoveLast + 1;
+        vecMain.erase(vecMain.begin() + *itRemoveFirst, itRemoveLastPast);
     }
 
 #ifdef DEBUG_LIST_OPS
@@ -879,168 +872,172 @@ void CWorldTicker::Tick()
             }
 
             // Need here a new, inner scope to get rid of EXC_TRYSUB variables
+            if (!_mWorldTickList.empty())
             {
-                EXC_TRYSUB("Selection");
-                _vecIndexMiscBuffer.clear();
-                WorldTickList::iterator itMap = _mWorldTickList.begin();
-                WorldTickList::iterator itMapEnd = _mWorldTickList.end();
-
-                size_t uiProgressive = 0;
-                int64 iTime;
-                while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
                 {
-                    CTimedObject* pTimedObj = itMap->second;
-                    if (pTimedObj->_IsTimerSet() && pTimedObj->_CanTick())
+                    EXC_TRYSUB("Selection");
+                    _vecIndexMiscBuffer.clear();
+                    WorldTickList::iterator itMap = _mWorldTickList.begin();
+                    WorldTickList::iterator itMapEnd = _mWorldTickList.end();
+
+                    size_t uiProgressive = 0;
+                    int64 iTime;
+                    while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
                     {
-                        if (pTimedObj->_GetTimeoutRaw() <= iCurTime)
+                        CTimedObject* pTimedObj = itMap->second;
+                        if (pTimedObj->_IsTimerSet() && pTimedObj->_CanTick())
                         {
-                            if (auto pObjBase = dynamic_cast<const CObjBase*>(pTimedObj))
+                            if (pTimedObj->_GetTimeoutRaw() <= iCurTime)
                             {
-                                if (pObjBase->_IsBeingDeleted())
-                                    continue;
+                                if (auto pObjBase = dynamic_cast<const CObjBase*>(pTimedObj))
+                                {
+                                    if (pObjBase->_IsBeingDeleted())
+                                        continue;
+                                }
+
+                                _vecGenericObjsToTick.emplace_back(static_cast<void*>(pTimedObj));
+                                _vecIndexMiscBuffer.emplace_back(uiProgressive);
+
+                                pTimedObj->_ClearTimeout();
                             }
-
-                            _vecGenericObjsToTick.emplace_back(static_cast<void*>(pTimedObj));
-                            _vecIndexMiscBuffer.emplace_back(uiProgressive);
-
-                            pTimedObj->_ClearTimeout();
+                            //else
+                            //{
+                            //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
+                            //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
+                            //}
                         }
-                        //else
-                        //{
-                        //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
-                        //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
-                        //}
+                        ++itMap;
+                        ++uiProgressive;
                     }
-                    ++itMap;
-                    ++uiProgressive;
+                    EXC_CATCHSUB("");
                 }
-                EXC_CATCHSUB("");
-            }
 
-            {
-                EXC_TRYSUB("Delete from List");
-                sortedVecRemoveElementsByIndices(_mWorldTickList, _vecIndexMiscBuffer);
-                EXC_CATCHSUB("");
-            }
-
-            _vecIndexMiscBuffer.clear();
-            // Done working with _mWorldTickList, we don't need the lock from now on.
-        }
-
-        lpctstr ptcSubDesc;
-        for (void* pObjVoid : _vecGenericObjsToTick)    // Loop through all msecs stored, unless we passed the timestamp.
-        {
-            ptcSubDesc = "Generic";
-
-            EXC_TRYSUB("Tick");
-            EXC_SETSUB_BLOCK("Elapsed");
-
-            CTimedObject* pTimedObj = static_cast<CTimedObject*>(pObjVoid);
-
-#if MT_ENGINES
-            std::unique_lock<std::shared_mutex> lockTimeObj(pTimedObj->MT_CMUTEX);
-#endif
-
-            const PROFILE_TYPE profile = pTimedObj->_GetProfileType();
-            const ProfileTask  profileTask(profile);
-
-            // Default to true, so if any error occurs it gets deleted for safety
-            //  (valid only for classes having the Delete method, which, for everyone to know, does NOT destroy the object).
-            bool fDelete = true;
-
-            switch (profile)
-            {
-                case PROFILE_ITEMS:
                 {
-                    CItem* pItem = dynamic_cast<CItem*>(pTimedObj);
-                    ASSERT(pItem);
-                    if (pItem->IsItemEquipped())
-                    {
-                        ptcSubDesc = "ItemEquipped";
-                        CObjBaseTemplate* pObjTop = pItem->GetTopLevelObj();
-                        ASSERT(pObjTop);
+                    EXC_TRYSUB("Delete from List");
+                    sortedVecRemoveElementsByIndices(_mWorldTickList, _vecIndexMiscBuffer);
+                    EXC_CATCHSUB("");
+                }
 
-                        CChar* pChar = dynamic_cast<CChar*>(pObjTop);
-                        if (pChar)
+                _vecIndexMiscBuffer.clear();
+                // Done working with _mWorldTickList, we don't need the lock from now on.
+
+                lpctstr ptcSubDesc;
+                for (void* pObjVoid : _vecGenericObjsToTick)    // Loop through all msecs stored, unless we passed the timestamp.
+                {
+                    ptcSubDesc = "Generic";
+
+                    EXC_TRYSUB("Tick");
+                    EXC_SETSUB_BLOCK("Elapsed");
+
+                    CTimedObject* pTimedObj = static_cast<CTimedObject*>(pObjVoid);
+#if MT_ENGINES
+                    std::unique_lock<std::shared_mutex> lockTimeObj(pTimedObj->MT_CMUTEX);
+#endif
+                    const PROFILE_TYPE profile = pTimedObj->_GetProfileType();
+                    const ProfileTask  profileTask(profile);
+
+                    // Default to true, so if any error occurs it gets deleted for safety
+                    //  (valid only for classes having the Delete method, which, for everyone to know, does NOT destroy the object).
+                    bool fDelete = true;
+
+                    switch (profile)
+                    {
+                        case PROFILE_ITEMS:
                         {
-                            fDelete = !pChar->OnTickEquip(pItem);
+                            CItem* pItem = dynamic_cast<CItem*>(pTimedObj);
+                            ASSERT(pItem);
+                            if (pItem->IsItemEquipped())
+                            {
+                                ptcSubDesc = "ItemEquipped";
+                                CObjBaseTemplate* pObjTop = pItem->GetTopLevelObj();
+                                ASSERT(pObjTop);
+
+                                CChar* pChar = dynamic_cast<CChar*>(pObjTop);
+                                if (pChar)
+                                {
+                                    fDelete = !pChar->OnTickEquip(pItem);
+                                    break;
+                                }
+
+                                ptcSubDesc = "Item (fallback)";
+                                g_Log.Event(LOGL_CRIT, "Item equipped, but not contained in a character? (UID: 0%" PRIx32 ")\n.", pItem->GetUID().GetObjUID());
+                            }
+                            else
+                            {
+                                ptcSubDesc = "Item";
+                            }
+                            fDelete = (pItem->_OnTick() == false);
                             break;
                         }
+                        break;
 
-                        ptcSubDesc = "Item (fallback)";
-                        g_Log.Event(LOGL_CRIT, "Item equipped, but not contained in a character? (UID: 0%" PRIx32 ")\n.", pItem->GetUID().GetObjUID());
+                        case PROFILE_CHARS:
+                        {
+                            ptcSubDesc = "Char";
+                            CChar* pChar = dynamic_cast<CChar*>(pTimedObj);
+                            ASSERT(pChar);
+                            fDelete = !pChar->_OnTick();
+                            if (!fDelete && pChar->m_pNPC && !pTimedObj->_IsTimerSet())
+                            {
+                                pTimedObj->_SetTimeoutS(3);   //3 seconds timeout to keep NPCs 'alive'
+                            }
+                        }
+                        break;
+
+                        case PROFILE_SECTORS:
+                        {
+                            ptcSubDesc = "Sector";
+                            fDelete = false;    // sectors should NEVER be deleted.
+                            pTimedObj->_OnTick();
+                        }
+                        break;
+
+                        case PROFILE_MULTIS:
+                        {
+                            ptcSubDesc = "Multi";
+                            fDelete = !pTimedObj->_OnTick();
+                        }
+                        break;
+
+                        case PROFILE_SHIPS:
+                        {
+                            ptcSubDesc = "ItemShip";
+                            fDelete = !pTimedObj->_OnTick();
+                        }
+                        break;
+
+                        case PROFILE_TIMEDFUNCTIONS:
+                        {
+                            ptcSubDesc = "TimedFunction";
+                            fDelete = false;
+                            pTimedObj->_OnTick();
+                        }
+                        break;
+
+                        default:
+                        {
+                            ptcSubDesc = "Default";
+                            fDelete = !pTimedObj->_OnTick();
+                        }
+                        break;
                     }
-                    else
+
+                    if (fDelete)
                     {
-                        ptcSubDesc = "Item";
+                        EXC_SETSUB_BLOCK("Delete");
+                        CObjBase* pObjBase = dynamic_cast<CObjBase*>(pTimedObj);
+                        ASSERT(pObjBase); // Only CObjBase-derived objects have the Delete method, and should be Delete-d.
+                        pObjBase->Delete();
                     }
-                    fDelete = (pItem->_OnTick() == false);
-                    break;
-                }
-                break;
 
-                case PROFILE_CHARS:
-                {
-                    ptcSubDesc = "Char";
-                    CChar* pChar = dynamic_cast<CChar*>(pTimedObj);
-                    ASSERT(pChar);
-                    fDelete = !pChar->_OnTick();
-                    if (!fDelete && pChar->m_pNPC && !pTimedObj->_IsTimerSet())
-                    {
-                        pTimedObj->_SetTimeoutS(3);   //3 seconds timeout to keep NPCs 'alive'
-                    }
+                    EXC_CATCHSUB(ptcSubDesc);
                 }
-                break;
-
-                case PROFILE_SECTORS:
-                {
-                    ptcSubDesc = "Sector";
-                    fDelete = false;    // sectors should NEVER be deleted.
-                    pTimedObj->_OnTick();
-                }
-                break;
-
-                case PROFILE_MULTIS:
-                {
-                    ptcSubDesc = "Multi";
-                    fDelete = !pTimedObj->_OnTick();
-                }
-                break;
-
-                case PROFILE_SHIPS:
-                {
-                    ptcSubDesc = "ItemShip";
-                    fDelete = !pTimedObj->_OnTick();
-                }
-                break;
-
-                case PROFILE_TIMEDFUNCTIONS:
-                {
-                    ptcSubDesc = "TimedFunction";
-                    fDelete = false;
-                    pTimedObj->_OnTick();
-                }
-                break;
-
-                default:
-                {
-                    ptcSubDesc = "Default";
-                    fDelete = !pTimedObj->_OnTick();
-                }
-                break;
             }
-
-            if (fDelete)
-            {
-                EXC_SETSUB_BLOCK("Delete");
-                CObjBase* pObjBase = dynamic_cast<CObjBase*>(pTimedObj);
-                ASSERT(pObjBase); // Only CObjBase-derived objects have the Delete method, and should be Delete-d.
-                pObjBase->Delete();
-            }
-
-            EXC_CATCHSUB(ptcSubDesc);
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+            else
+                g_Log.EventDebug("No ctimedobj ticks for this loop.\n");
+#endif
         }
-
     }
 
     _vecGenericObjsToTick.clear();
@@ -1065,59 +1062,67 @@ void CWorldTicker::Tick()
             EXC_CATCHSUB("");
         }
 
+        if (!_mCharTickList.empty())
         {
-            EXC_TRYSUB("Selection");
-#ifdef _DEBUG
-            g_Log.EventDebug("Start looping through char periodic ticks.\n");
-#endif
-            CharTickList::iterator itMap       = _mCharTickList.begin();
-            CharTickList::iterator itMapEnd    = _mCharTickList.end();
-
-            size_t uiProgressive = 0;
-            int64 iTime;
-            while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
             {
-                CChar* pChar = itMap->second;
-#ifdef _DEBUG
-                g_Log.EventDebug("Executing char periodic tick: %p. Registered time: %" PRId64 ". pChar->_iTimePeriodicTick: %" PRId64 "\n",
-                    (void*)pChar, itMap->first, pChar->_iTimePeriodicTick);
+                EXC_TRYSUB("Selection");
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+                g_Log.EventDebug("Start looping through char periodic ticks.\n");
 #endif
-                if ((pChar->_iTimePeriodicTick != 0) && pChar->_CanTick() && !pChar->_IsBeingDeleted())
+                CharTickList::iterator itMap       = _mCharTickList.begin();
+                CharTickList::iterator itMapEnd    = _mCharTickList.end();
+
+                size_t uiProgressive = 0;
+                int64 iTime;
+                while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
                 {
-                    if (pChar->_iTimePeriodicTick <= iCurTime)
-                    {
-                        _vecGenericObjsToTick.emplace_back(static_cast<void*>(pChar));
-                        _vecIndexMiscBuffer.emplace_back(uiProgressive);
-
-                        pChar->_iTimePeriodicTick = 0;
-                    }
-                    //else
-                    //{
-                    //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
-                    //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
-                    //}
-
-                }
-                ++itMap;
-                ++uiProgressive;
-            }
-            EXC_CATCHSUB("");
-
-#ifdef _DEBUG
-            g_Log.EventDebug("Done looping through char periodic ticks.\n");
+                    CChar* pChar = itMap->second;
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+                    g_Log.EventDebug("Executing char periodic tick: %p. Registered time: %" PRId64 ". pChar->_iTimePeriodicTick: %" PRId64 "\n",
+                        (void*)pChar, itMap->first, pChar->_iTimePeriodicTick);
+                    ASSERT(itMap->first == pChar->_iTimePeriodicTick);
 #endif
+                    if ((pChar->_iTimePeriodicTick != 0) && pChar->_CanTick() && !pChar->_IsBeingDeleted())
+                    {
+                        if (pChar->_iTimePeriodicTick <= iCurTime)
+                        {
+                            _vecGenericObjsToTick.emplace_back(static_cast<void*>(pChar));
+                            _vecIndexMiscBuffer.emplace_back(uiProgressive);
+
+                            pChar->_iTimePeriodicTick = 0;
+                        }
+                        //else
+                        //{
+                        //    // This shouldn't happen... If it does, get rid of the entry on the list anyways,
+                        //    //  it got desynchronized in some way and might be an invalid or even deleted and deallocated object!
+                        //}
+
+                    }
+                    ++itMap;
+                    ++uiProgressive;
+                }
+                EXC_CATCHSUB("");
+
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+                g_Log.EventDebug("Done looping through char periodic ticks. Need to tick n %" PRIuSIZE_T " objs.\n", _vecGenericObjsToTick.size());
+#endif
+            }
+
+            {
+                EXC_TRYSUB("Delete from List");
+                // Erase in chunks, call erase the least times possible.
+                sortedVecRemoveElementsByIndices(_mCharTickList, _vecIndexMiscBuffer);
+                EXC_CATCHSUB("DeleteFromList");
+
+                _vecIndexMiscBuffer.clear();
+            }
+
+            // Done working with _mCharTickList, we don't need the lock from now on.
         }
-
-        {
-            EXC_TRYSUB("Delete from List");
-            // Erase in chunks, call erase the least times possible.
-            sortedVecRemoveElementsByIndices(_mCharTickList, _vecIndexMiscBuffer);
-            EXC_CATCHSUB("DeleteFromList");
-
-            _vecIndexMiscBuffer.clear();
-        }
-
-        // Done working with _mCharTickList, we don't need the lock from now on.
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+        else
+            g_Log.EventDebug("No char periodic ticks for this loop.\n");
+#endif
     }
 
     {
