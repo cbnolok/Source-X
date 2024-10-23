@@ -347,7 +347,7 @@ bool CWorldTicker::_RemoveCharTicking(const int64 iOldTimeout, CChar* pChar)
     }
 
 #ifdef _DEBUG
-    bool fRemovedFromTickList = (_vecPeriodicCharsToAddToList.end() == itAddFound);
+    bool fRemovedFromTickList = !fRemovedFromAddList && (_vecPeriodicCharsToAddToList.end() == itAddFound);
     ASSERT(fRemovedFromTickList || fRemovedFromAddList);
 #endif
 
@@ -581,10 +581,7 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
         return;
 
     if (vecMain.empty())
-    {
-        vecMain.clear();
         return;
-    }
 
     DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
     DEBUG_ASSERT(std::is_sorted(vecIndicesToRemove.begin(), vecIndicesToRemove.end()));
@@ -918,7 +915,6 @@ void CWorldTicker::Tick()
                     EXC_CATCHSUB("");
                 }
 
-                _vecIndexMiscBuffer.clear();
                 // Done working with _mWorldTickList, we don't need the lock from now on.
 
                 lpctstr ptcSubDesc;
@@ -1069,6 +1065,7 @@ void CWorldTicker::Tick()
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
                 g_Log.EventDebug("Start looping through char periodic ticks.\n");
 #endif
+                _vecIndexMiscBuffer.clear();
                 CharTickList::iterator itMap       = _mCharTickList.begin();
                 CharTickList::iterator itMapEnd    = _mCharTickList.end();
 
@@ -1088,8 +1085,6 @@ void CWorldTicker::Tick()
                         {
                             _vecGenericObjsToTick.emplace_back(static_cast<void*>(pChar));
                             _vecIndexMiscBuffer.emplace_back(uiProgressive);
-
-                            pChar->_iTimePeriodicTick = 0;
                         }
                         //else
                         //{
@@ -1130,6 +1125,7 @@ void CWorldTicker::Tick()
         for (void* pObjVoid : _vecGenericObjsToTick)    // Loop through all msecs stored, unless we passed the timestamp.
         {
             CChar* pChar = static_cast<CChar*>(pObjVoid);
+            pChar->_iTimePeriodicTick = 0;
             if (pChar->OnTickPeriodic())
             {
                 AddCharTicking(pChar, false);
