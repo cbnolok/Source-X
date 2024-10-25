@@ -11,9 +11,9 @@
 
 #ifdef _DEBUG
 #   define DEBUG_CTIMEDOBJ_TIMED_TICKING
-#   define DEBUG_CCHAR_PERIODIC_TICKING
+//#   define DEBUG_CCHAR_PERIODIC_TICKING
 //#   define DEBUG_STATUSUPDATES
-#   define DEBUG_LIST_OPS
+//#   define DEBUG_LIST_OPS
 //#   define BENCHMARK_LISTS // TODO
 #endif
 
@@ -36,6 +36,9 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 {
     ASSERT(pTimedObject);
     ASSERT(iTimeout != 0);
+
+    ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+    ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
 
     const auto fnFindEntry = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
         return pTimedObject == rhs.second;
@@ -89,11 +92,9 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
             g_Log.EventDebug("[%p] WARN: But that's fine, because i already have requested to remove that!\n", (void*)pTimedObject);
 #endif
-            return; // Already requested the addition.
         }
-
-        DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
-        return; // Already requested the addition.
+        else
+            return; // Already requested the addition.
     }
 
     _vecWorldObjsAddRequested.emplace_back(iTimeout, pTimedObject);
@@ -104,6 +105,9 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 
 void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 {
+    ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+    ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+
     const auto fnFindEntry = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
         return pTimedObject == rhs.second;
     };
@@ -313,14 +317,15 @@ bool CWorldTicker::_RemoveCharTicking(CChar* pChar)
     // I'm reasonably sure that the element i'm trying to remove is present in this container.
     ASSERT(pChar);
 
-    const auto fnFindEntry = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
-        return pChar == rhs.second;
-    };
 #if MT_ENGINES
     std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
 
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
+    const auto fnFindEntry = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
+        return pChar == rhs.second;
+    };
+
     const auto itRemoveFound = std::find(
         _vecPeriodicCharsToEraseFromList.begin(),
         _vecPeriodicCharsToEraseFromList.end(),
@@ -601,9 +606,9 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
 
 #ifdef DEBUG_LIST_OPS
     g_Log.EventDebug("Starting sortedVecRemoveElementsByIndices.\n");
+#endif
     // Copy the original vector to check against later
     std::vector<T> originalVecMain = vecMain;
-#endif
 
     // Start from the end of vecIndicesToRemove, working backwards with normal iterators
     auto itRemoveFirst = vecIndicesToRemove.end();  // Points one past the last element
@@ -631,13 +636,13 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
         vecMain.erase(vecMain.begin() + *itRemoveFirst, itRemoveLastPast);
     }
 
-#ifdef DEBUG_LIST_OPS
+//#ifdef DEBUG_LIST_OPS
     // Sanity Check: Verify that the removed elements are no longer present in vecMain
     for (auto index : vecIndicesToRemove) {
         ASSERT(index < originalVecMain.size());
         ASSERT(std::find(vecMain.begin(), vecMain.end(), originalVecMain[index]) == vecMain.end());
     }
-#endif
+//#endif
 
     g_Log.EventDebug("Sizes: new vec %" PRId64 ", old vec %" PRId64 ", remove vec %" PRId64 ".\n",
         vecMain.size(), sz, vecIndicesToRemove.size());
@@ -850,6 +855,7 @@ static void unsortedVecDifference(
         vecElemBuffer.size(), vecMain.size(), vecToRemove.size());
     ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
 
+    /*
     for (auto& elem : vecToRemove) {
         g_Log.EventDebug("Should remove %p.\n", (void*)elem);
     }
@@ -859,6 +865,7 @@ static void unsortedVecDifference(
     for (auto& elem : vecElemBuffer) {
         g_Log.EventDebug("NewVec %p.\n", (void*)elem.second);
     }
+*/
 }
 
 template <typename TPair, typename T>
@@ -890,6 +897,8 @@ static void sortedVecRemoveAddQueued(
             ASSERT (it == vecElemBuffer.end());
         }
         ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
+        DEBUG_ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
+        DEBUG_ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
 
         vecMain.swap(vecElemBuffer);
 
@@ -905,13 +914,16 @@ static void sortedVecRemoveAddQueued(
     if (!vecToAdd.empty())
     {
         vecElemBuffer.clear();
-        vecMain.reserve(vecMain.size() + vecToAdd.size());
+        vecElemBuffer.reserve(vecMain.size() + vecToAdd.size());
         std::merge(
             vecMain.begin(), vecMain.end(),
             vecToAdd.begin(), vecToAdd.end(),
             std::back_inserter(vecElemBuffer)
             );
         ASSERT(vecElemBuffer.size() == vecMain.size() + vecToAdd.size());
+        DEBUG_ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
+        DEBUG_ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
+
         vecMain.swap(vecElemBuffer);
         //vecMain = std::move(vecElemBuffer);
         vecElemBuffer.clear();
@@ -999,12 +1011,16 @@ void CWorldTicker::Tick()
 #if MT_ENGINES
             std::unique_lock<std::shared_mutex> lock(_mWorldTickList.MT_CMUTEX);
 #endif
+            ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+            ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
             {
                 // New requests done during the world loop.
                 EXC_TRYSUB("Update main list");
                 sortedVecRemoveAddQueued(_mWorldTickList, _vecWorldObjsEraseRequested, _vecWorldObjsAddRequested, _vecWorldObjsElementBuffer);
                 EXC_CATCHSUB("");
             }
+            ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+            ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
 
             // Need here a new, inner scope to get rid of EXC_TRYSUB variables
             if (!_mWorldTickList.empty())
@@ -1046,6 +1062,11 @@ void CWorldTicker::Tick()
                     EXC_CATCHSUB("");
                 }
 
+                ASSERT(sl::ContainerIsSorted(_vecGenericObjsToTick));
+                ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
+                ASSERT(!sl::SortedContainerHasDuplicates(_vecGenericObjsToTick));
+                ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
+
                 {
                     EXC_TRYSUB("Delete from List");
                     sortedVecRemoveElementsByIndices(_mWorldTickList, _vecIndexMiscBuffer);
@@ -1058,6 +1079,9 @@ void CWorldTicker::Tick()
                     }
                     EXC_CATCHSUB("");
                 }
+                ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+                ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+
 
                 // Done working with _mWorldTickList, we don't need the lock from now on.
 
@@ -1198,10 +1222,14 @@ void CWorldTicker::Tick()
         std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
         {
+            ASSERT(sl::ContainerIsSorted(_mCharTickList));
+            ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
             // New requests done during the world loop.
             EXC_TRYSUB("Update main list");
             sortedVecRemoveAddQueued(_mCharTickList, _vecPeriodicCharsToEraseFromList, _vecPeriodicCharsToAddToList, _vecPeriodicCharsElementBuffer);
             EXC_CATCHSUB("");
+            ASSERT(sl::ContainerIsSorted(_mCharTickList));
+            ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
         }
 
         if (!_mCharTickList.empty())
@@ -1244,6 +1272,11 @@ void CWorldTicker::Tick()
                 }
                 EXC_CATCHSUB("");
 
+                ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
+                ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
+                ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
+
+
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
                 //g_Log.EventDebug("Done looping through char periodic ticks. Need to tick n %" PRIuSIZE_T " objs.\n", _vecGenericObjsToTick.size());
 #endif
@@ -1257,6 +1290,9 @@ void CWorldTicker::Tick()
 
                 _vecIndexMiscBuffer.clear();
             }
+            ASSERT(sl::ContainerIsSorted(_mCharTickList));
+            ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
+
 
             // Done working with _mCharTickList, we don't need the lock from now on.
         }

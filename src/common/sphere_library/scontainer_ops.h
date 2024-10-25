@@ -44,7 +44,7 @@ bool ContainerIsSorted(T const& cont)
 template <ConceptBasicContainer T>
 bool SortedContainerHasDuplicates(T const& cont)
 {
-    return std::adjacent_find(cont.begin(), cont.end()) == cont.end();
+    return std::adjacent_find(cont.begin(), cont.end()) != cont.end();
 }
 
 /*
