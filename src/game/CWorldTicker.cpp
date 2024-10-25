@@ -58,6 +58,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
         return; // Already requested the addition.
     }
 
+    /*
     const auto itFoundEraseRequest = std::find(
         _vecWorldObjsEraseRequested.begin(),
         _vecWorldObjsEraseRequested.end(),
@@ -68,7 +69,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
         g_Log.EventDebug("[%p] WARN: Stopped attempt of inserting a CTimedObj which removal from ticking list has been requested before!\n", (void*)pTimedObject);
 #endif
         return; // Already requested the addition.
-    }
+    }*/
 
     const auto itFound = std::find_if(
         _mWorldTickList.begin(),
@@ -79,6 +80,18 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] WARN: Requested insertion of a CTimedObj already in the ticking list.\n", (void*)pTimedObject);
 #endif
+        const auto itFoundEraseRequest = std::find(
+            _vecWorldObjsEraseRequested.begin(),
+            _vecWorldObjsEraseRequested.end(),
+            pTimedObject);
+        if (_vecWorldObjsEraseRequested.end() != itFoundEraseRequest)
+        {
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+            g_Log.EventDebug("[%p] WARN: But that's fine, because i already have requested to remove that!\n", (void*)pTimedObject);
+#endif
+            return; // Already requested the addition.
+        }
+
         DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
         return; // Already requested the addition.
     }
@@ -249,14 +262,14 @@ void CWorldTicker::_InsertCharTicking(const int64 iTickNext, CChar* pChar)
     ASSERT(iTickNext != 0);
     ASSERT(pChar);
 
-    const auto fnFindEntry = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
-        return pChar == rhs.second;
-    };
 #if MT_ENGINES
     std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
 
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
+    const auto fnFindEntry = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
+        return pChar == rhs.second;
+    };
     const auto itFound = std::find_if(
         _vecPeriodicCharsToAddToList.begin(),
         _vecPeriodicCharsToAddToList.end(),
@@ -441,7 +454,7 @@ void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
     if (iTickOld == 0)
     {
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
-        g_Log.EventDebug("[%p] WARN: Requested deletion of Periodic char, but Timeout is 0, so it shouldn't be in the list.\n", (void*)pChar);
+        g_Log.EventDebug("[%p] WARN: Requested deletion of Periodic char, but Timeout is 0. It shouldn't be in the list, or just queued to be removed.\n", (void*)pChar);
         auto fnFindEntry = [pChar](const TickingPeriodicCharEntry& entry) noexcept {
                 return entry.second == pChar;
         };
@@ -453,7 +466,7 @@ void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
         if (itTickRemoveList != _vecPeriodicCharsToEraseFromList.end())
         {
             g_Log.EventDebug("[%p] WARN:   though, found it in the removal list, so it's fine..\n", (void*)pChar);
-            ASSERT(false);
+            //ASSERT(false);
             return;
         }
 
@@ -578,6 +591,8 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     if (vecMain.empty())
         return;
 
+    size_t sz = vecMain.size();
+
     DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
     DEBUG_ASSERT(std::is_sorted(vecIndicesToRemove.begin(), vecIndicesToRemove.end()));
     // Check that those sorted vectors do not have duplicated values.
@@ -623,6 +638,11 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
         ASSERT(std::find(vecMain.begin(), vecMain.end(), originalVecMain[index]) == vecMain.end());
     }
 #endif
+
+    g_Log.EventDebug("Sizes: new vec %" PRId64 ", old vec %" PRId64 ", remove vec %" PRId64 ".\n",
+        vecMain.size(), sz, vecIndicesToRemove.size());
+    ASSERT(vecMain.size() == sz - vecIndicesToRemove.size());
+
 
     /*
     // Alternative implementation:
@@ -778,6 +798,7 @@ static void unsortedVecDifference(
 
     // Use an iterator to store the position for bulk insertion
     auto itCopyFromThis = vecMain.begin();
+    /*
     auto itFindBegin = vecToRemove.begin();
 
     // Iterate through vecMain, copying elements that are not in vecToRemove
@@ -798,7 +819,6 @@ static void unsortedVecDifference(
             // We do not change itFindBegin here, since we want to keep searching for this pointer
             // in vecToRemove for subsequent elements in vecMain
         }
-        /*
         else
         {
             // If itTemp is not found, we can still copy the current element
@@ -809,11 +829,36 @@ static void unsortedVecDifference(
                 itCopyFromThis = itMain + 1;
             }
         }
-*/
+    }*/
+
+    // Iterate through vecMain, copying elements that are not in vecToRemove
+    for (auto itMain = vecMain.begin(); itMain != vecMain.end(); ++itMain) {
+        // Perform a linear search for the current element's pointer in vecToRemove
+        auto itTemp = std::find(vecToRemove.begin(), vecToRemove.end(), itMain->second);
+        if (itTemp != vecToRemove.end()) {
+            // If the element is found in vecToRemove, copy elements before it
+            vecElemBuffer.insert(vecElemBuffer.end(), itCopyFromThis, itMain); // Copy up to but not including itMain
+
+            // Move itCopyFromThis forward to the next element
+            itCopyFromThis = itMain + 1; // Move to the next element after itMain
+        }
     }
 
     // Copy any remaining elements in vecMain after the last found element
     vecElemBuffer.insert(vecElemBuffer.end(), itCopyFromThis, vecMain.end());
+    g_Log.EventDebug("Sizes: new vec %" PRId64 ", old vec %" PRId64 ", remove vec %" PRId64 ".\n",
+        vecElemBuffer.size(), vecMain.size(), vecToRemove.size());
+    ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
+
+    for (auto& elem : vecToRemove) {
+        g_Log.EventDebug("Should remove %p.\n", (void*)elem);
+    }
+    for (auto& elem : vecMain) {
+        g_Log.EventDebug("VecMain %p.\n", (void*)elem.second);
+    }
+    for (auto& elem : vecElemBuffer) {
+        g_Log.EventDebug("NewVec %p.\n", (void*)elem.second);
+    }
 }
 
 template <typename TPair, typename T>
@@ -844,6 +889,7 @@ static void sortedVecRemoveAddQueued(
             auto it = std::find_if(vecElemBuffer.begin(), vecElemBuffer.end(), [elem](auto &rhs) {return elem == rhs.second;});
             ASSERT (it == vecElemBuffer.end());
         }
+        ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
 
         vecMain.swap(vecElemBuffer);
 
@@ -865,6 +911,7 @@ static void sortedVecRemoveAddQueued(
             vecToAdd.begin(), vecToAdd.end(),
             std::back_inserter(vecElemBuffer)
             );
+        ASSERT(vecElemBuffer.size() == vecMain.size() + vecToAdd.size());
         vecMain.swap(vecElemBuffer);
         //vecMain = std::move(vecElemBuffer);
         vecElemBuffer.clear();
@@ -944,7 +991,7 @@ void CWorldTicker::Tick()
 
     {
         // Need this new scope to give the right lifetime to ProfileTask.
-        g_Log.EventDebug("Start ctimedobj section.\n");
+        //g_Log.EventDebug("Start ctimedobj section.\n");
         EXC_SET_BLOCK("TimedObjects");
         const ProfileTask timersTask(PROFILE_TIMERS);
         {
@@ -1134,7 +1181,7 @@ void CWorldTicker::Tick()
     }
 
     _vecGenericObjsToTick.clear();
-    g_Log.EventDebug("END ctimedobj section.\n");
+    //g_Log.EventDebug("END ctimedobj section.\n");
 
     // ----
 
@@ -1142,6 +1189,7 @@ void CWorldTicker::Tick()
 
     // No need another scope here to encapsulate this ProfileTask, because from now on, to the end of this method,
     //  everything we do is related to char-only stuff.
+    //g_Log.EventDebug("Start periodic ticks section.\n");
     EXC_SET_BLOCK("Char Periodic Ticks");
     const ProfileTask taskChars(PROFILE_CHARS);
     {
@@ -1161,7 +1209,7 @@ void CWorldTicker::Tick()
             {
                 EXC_TRYSUB("Selection");
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
-                g_Log.EventDebug("Start looping through char periodic ticks.\n");
+                //g_Log.EventDebug("Start looping through char periodic ticks.\n");
 #endif
                 _vecIndexMiscBuffer.clear();
                 CharTickList::iterator itMap       = _mCharTickList.begin();
@@ -1197,7 +1245,7 @@ void CWorldTicker::Tick()
                 EXC_CATCHSUB("");
 
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
-                g_Log.EventDebug("Done looping through char periodic ticks. Need to tick n %" PRIuSIZE_T " objs.\n", _vecGenericObjsToTick.size());
+                //g_Log.EventDebug("Done looping through char periodic ticks. Need to tick n %" PRIuSIZE_T " objs.\n", _vecGenericObjsToTick.size());
 #endif
             }
 
@@ -1237,6 +1285,8 @@ void CWorldTicker::Tick()
 
         _vecGenericObjsToTick.clear();
     }
+
+    //g_Log.EventDebug("END periodic ticks section.\n");
 
     EXC_CATCH;
 }

@@ -639,7 +639,8 @@ int CChar::NPC_WalkToPoint( bool fRun )
 	else if (iTickNext > 5 * MSECS_PER_SEC)  // neither more than 5 seconds.
 		iTickNext = 5 * MSECS_PER_SEC;
 
-	_SetTimeout(iTickNext);
+    g_Log.EventDebug("Moving. Setting new timer to iTickNext %" PRId64 ".\n", iTickNext);
+    _SetTimeout(iTickNext);
 	EXC_CATCH;
 	return 1;
 }
