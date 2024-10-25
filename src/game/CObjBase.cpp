@@ -225,7 +225,7 @@ void CObjBase::DeletePrepare()
 	RemoveSelf();
 
     if (fTopLevel)
-        	_uiInternalStateFlags |= SF_TOPLEVEL;
+        _uiInternalStateFlags |= SF_TOPLEVEL;
 }
 
 void CObjBase::DeleteCleanup(bool fForce)

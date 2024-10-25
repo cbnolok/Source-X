@@ -63,8 +63,8 @@ private:
         MT_CMUTEX_DEF;
     };
 
-    using TickingCharEntry = std::pair<int64, CChar*>;
-    struct CharTickList : public std::vector<TickingCharEntry>
+    using TickingPeriodicCharEntry = std::pair<int64, CChar*>;
+    struct CharTickList : public std::vector<TickingPeriodicCharEntry>
     {
         MT_CMUTEX_DEF;
     };
@@ -89,12 +89,12 @@ private:
     std::vector<size_t> _vecIndexMiscBuffer;
 
     std::vector<TickingTimedObjEntry> _vecWorldObjsAddRequested;
-    std::vector<TickingTimedObjEntry> _vecWorldObjsEraseRequested;
+    std::vector<CTimedObject*> _vecWorldObjsEraseRequested;
     std::vector<TickingTimedObjEntry> _vecWorldObjsElementBuffer;
 
-    std::vector<TickingCharEntry> _vecPeriodicCharsToAddToList;
-    std::vector<TickingCharEntry> _vecPeriodicCharsToEraseFromList;
-    std::vector<TickingCharEntry> _vecPeriodicCharsElementBuffer;
+    std::vector<TickingPeriodicCharEntry> _vecPeriodicCharsToAddToList;
+    std::vector<CChar*> _vecPeriodicCharsToEraseFromList;
+    std::vector<TickingPeriodicCharEntry> _vecPeriodicCharsElementBuffer;
 
     //----
 
@@ -116,10 +116,10 @@ public:
     void DelObjStatusUpdate(CObjBase* pObj, bool fNeedsLock);
 
 private:
-    void _InsertTimedObject(const int64 iTimeout, CTimedObject* pTimedObject);
-    void _RemoveTimedObject(const int64 iOldTimeout, CTimedObject* pTimedObject);
-    void _InsertCharTicking(const int64 iTickNext, CChar* pChar);
-    bool _RemoveCharTicking(const int64 iOldTimeout, CChar* pChar);
+    void _InsertTimedObject(int64 iTimeout, CTimedObject* pTimedObject);
+    void _RemoveTimedObject(CTimedObject* pTimedObject);
+    void _InsertCharTicking(int64 iTickNext, CChar* pChar);
+    bool _RemoveCharTicking(CChar* pChar);
 };
 
 #endif // _INC_CWORLDTICKER_H

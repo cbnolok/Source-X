@@ -338,7 +338,7 @@ CChar::CChar( CREID_TYPE baseID ) :
 CChar::~CChar()
 {
 	ADDTOCALLSTACK("CChar::~CChar");
-    	EXC_TRY("Cleanup in destructor");
+    EXC_TRY("Cleanup in destructor");
 
 	CChar::DeletePrepare();
 	CChar::DeleteCleanup(true);
