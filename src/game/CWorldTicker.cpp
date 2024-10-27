@@ -37,8 +37,8 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
     ASSERT(pTimedObject);
     ASSERT(iTimeout != 0);
 
-    ASSERT(sl::ContainerIsSorted(_mWorldTickList));
-    ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+    DEBUG_ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+    DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
 
     const auto fnFindEntry = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
         return pTimedObject == rhs.second;
@@ -54,10 +54,11 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
     if (_vecWorldObjsAddRequested.end() != itFoundAddRequest)
     {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
-        g_Log.EventDebug("[%p] WARN: CTimedObj insertion into ticking list already requested with %s timer.\n",
+        g_Log.EventDebug("[%p] WARN: CTimedObj insertion into ticking list already requested with %s timer. OVERWRITING.\n",
             (void*)pTimedObject,
             ((itFoundAddRequest->first == iTimeout) ? "same" : "different"));
 #endif
+        itFoundAddRequest->first = iTimeout;
         return; // Already requested the addition.
     }
 
@@ -105,8 +106,8 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 
 void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 {
-    ASSERT(sl::ContainerIsSorted(_mWorldTickList));
-    ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+    DEBUG_ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+    DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
 
     const auto fnFindEntry = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
         return pTimedObject == rhs.second;
@@ -363,7 +364,8 @@ bool CWorldTicker::_RemoveCharTicking(CChar* pChar)
     }
 
     bool fRemovedFromTickList = !fRemovedFromAddList && (_vecPeriodicCharsToAddToList.end() == itAddFound);
-    ASSERT(fRemovedFromTickList || fRemovedFromAddList);
+    UnreferencedParameter(fRemovedFromTickList);
+    DEBUG_ASSERT(fRemovedFromTickList || fRemovedFromAddList);
 #endif
 
     _vecPeriodicCharsToEraseFromList.emplace_back(pChar);
@@ -1036,6 +1038,9 @@ void CWorldTicker::Tick()
                     while ((itMap != itMapEnd) && (iCurTime > (iTime = itMap->first)))
                     {
                         CTimedObject* pTimedObj = itMap->second;
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+                        g_Log.EventDebug("Checking if CTimedObject %p should tick.\n", reinterpret_cast<void*>(pTimedObj));
+#endif
                         if (pTimedObj->_IsTimerSet() && pTimedObj->_CanTick())
                         {
                             if (pTimedObj->_GetTimeoutRaw() <= iCurTime)
@@ -1062,10 +1067,9 @@ void CWorldTicker::Tick()
                     EXC_CATCHSUB("");
                 }
 
-                ASSERT(sl::ContainerIsSorted(_vecGenericObjsToTick));
                 ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
-                ASSERT(!sl::SortedContainerHasDuplicates(_vecGenericObjsToTick));
                 ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
+                ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
 
                 {
                     EXC_TRYSUB("Delete from List");
@@ -1094,6 +1098,9 @@ void CWorldTicker::Tick()
                     EXC_SETSUB_BLOCK("Elapsed");
 
                     CTimedObject* pTimedObj = static_cast<CTimedObject*>(pObjVoid);
+//#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+//                    g_Log.EventDebug("Ticking CTimedObject %p.\n", reinterpret_cast<void*>(pTimedObj));
+//#endif
 #if MT_ENGINES
                     std::unique_lock<std::shared_mutex> lockTimeObj(pTimedObj->MT_CMUTEX);
 #endif
@@ -1272,9 +1279,9 @@ void CWorldTicker::Tick()
                 }
                 EXC_CATCHSUB("");
 
-                ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
-                ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
-                ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
+                DEBUG_ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
+                DEBUG_ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
+                DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
 
 
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
@@ -1290,8 +1297,8 @@ void CWorldTicker::Tick()
 
                 _vecIndexMiscBuffer.clear();
             }
-            ASSERT(sl::ContainerIsSorted(_mCharTickList));
-            ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
+            DEBUG_ASSERT(sl::ContainerIsSorted(_mCharTickList));
+            DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
 
 
             // Done working with _mCharTickList, we don't need the lock from now on.

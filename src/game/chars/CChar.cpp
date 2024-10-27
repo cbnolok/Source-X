@@ -4678,7 +4678,7 @@ bool CChar::r_Verb( CScript &s, CTextConsole * pSrc ) // Execute command from sc
 				Effect( EFFECT_LIGHTNING, ITEMID_NOTHING, pCharSrc );
 				OnTakeDamage( 10000, pCharSrc, DAMAGE_GOD );
 				Stat_SetVal( STAT_STR, 0 );
-				g_Log.Event( LOGL_EVENT|LOGM_KILLS|LOGM_GM_CMDS, "'%s' was KILLed by '%s'\n", GetName(), pSrc->GetName());
+                g_Log.Event( LOGL_EVENT|LOGM_KILLS|LOGM_GM_CMDS, "'%s' (ptr %p) was KILLed by '%s'\n", GetName(), (void*)this, pSrc->GetName());
 			}
 			break;
 		case CHV_MAKEITEM:
