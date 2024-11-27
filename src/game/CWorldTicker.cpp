@@ -81,21 +81,39 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
         fnFindEntry);
     if (_mWorldTickList.end() != itFound)
     {
+        if (itFound->first == iTimeout)
+        {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
-        g_Log.EventDebug("[%p] WARN: Requested insertion of a CTimedObj already in the ticking list.\n", (void*)pTimedObject);
+            g_Log.EventDebug("[%p] WARN: Requested insertion of a CTimedObj in the main ticking list with the same timeout, skipping.\n", (void*)pTimedObject);
+#endif
+            return;
+        }
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+        g_Log.EventDebug("[%p] WARN: Requested insertion of a CTimedObj already in the main ticking list.\n", (void*)pTimedObject);
 #endif
         const auto itFoundEraseRequest = std::find(
             _vecWorldObjsEraseRequested.begin(),
             _vecWorldObjsEraseRequested.end(),
             pTimedObject);
-        if (_vecWorldObjsEraseRequested.end() != itFoundEraseRequest)
+        if (_vecWorldObjsEraseRequested.end() == itFoundEraseRequest)
         {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
-            g_Log.EventDebug("[%p] WARN: But that's fine, because i already have requested to remove that!\n", (void*)pTimedObject);
+            g_Log.EventDebug("[%p] WARN: But i didn't even requested to remove that!\n", (void*)pTimedObject);
 #endif
+            ASSERT(false);
+            return;
         }
-        else
-            return; // Already requested the addition.
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+        g_Log.EventDebug("[%p] WARN: But that's fine, because i already have requested to remove that!\n", (void*)pTimedObject);
+#endif
+    }
+    else
+    {
+        const auto itFoundEraseRequest = std::find(
+            _vecWorldObjsEraseRequested.begin(),
+            _vecWorldObjsEraseRequested.end(),
+            pTimedObject);
+        ASSERT(_vecWorldObjsEraseRequested.end() == itFoundEraseRequest);
     }
 
     _vecWorldObjsAddRequested.emplace_back(iTimeout, pTimedObject);
@@ -116,38 +134,46 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
     std::unique_lock<std::shared_mutex> lock(_mWorldTickList.MT_CMUTEX);
 #endif
 
-    const auto itRemoveFound = std::find(
-        _vecWorldObjsEraseRequested.begin(),
-        _vecWorldObjsEraseRequested.end(),
-        pTimedObject);
-    if (_vecWorldObjsEraseRequested.end() != itRemoveFound)
-    {
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
-        g_Log.EventDebug("[%p] WARN: CTimedObj removal from ticking list already requested.\n", (void*)pTimedObject);
-#endif
-        return; // Already requested the removal.
-    }
-
-    // Check if it's in the ticking list.
     // TODO: use binary search here?
-    bool fRemovedFromAddBuffer = false;
+    const auto itTickList = std::find_if(
+        _mWorldTickList.begin(),
+        _mWorldTickList.end(),
+        fnFindEntry);
+
+    //bool fRemovedFromAddBuffer = false;
     const auto itAddList = std::find_if(
         _vecWorldObjsAddRequested.begin(),
         _vecWorldObjsAddRequested.end(),
         fnFindEntry);
+
+    const auto itRemoveFound = std::find(
+        _vecWorldObjsEraseRequested.begin(),
+        _vecWorldObjsEraseRequested.end(),
+        pTimedObject);
+
     if (itAddList != _vecWorldObjsAddRequested.end())
     {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] INFO: Removing CTimedObj from the ticking list add buffer.\n", (void*)pTimedObject);
 #endif
         _vecWorldObjsAddRequested.erase(itAddList);
-        fRemovedFromAddBuffer = true;
+        //fRemovedFromAddBuffer = true;
+        if (itRemoveFound == _vecWorldObjsEraseRequested.end()) {
+            ASSERT(itTickList == _mWorldTickList.end());
+        }
+        return;
     }
 
-    const auto itTickList = std::find_if(
-        _mWorldTickList.begin(),
-        _mWorldTickList.end(),
-        fnFindEntry);
+    if (_vecWorldObjsEraseRequested.end() != itRemoveFound)
+    {
+        // I have already requested to remove this from the main ticking list.
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+        g_Log.EventDebug("[%p] WARN: CTimedObj removal from the main ticking list already requested.\n", (void*)pTimedObject);
+#endif
+        ASSERT(itAddList == _vecWorldObjsAddRequested.end());
+        return; // Already requested the removal.
+    }
+
     if (itTickList == _mWorldTickList.end())
     {
         // Not found. The object might have a timeout while being in a non-tickable state, so it isn't in the list.
@@ -156,11 +182,13 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 #endif
         return;
     }
+    /*
     else
     {
         UnreferencedParameter(fRemovedFromAddBuffer);
         DEBUG_ASSERT(!fRemovedFromAddBuffer);
     }
+*/
 
     _vecWorldObjsEraseRequested.emplace_back(pTimedObject);
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
@@ -855,9 +883,7 @@ static void unsortedVecDifference(
     vecElemBuffer.insert(vecElemBuffer.end(), itCopyFromThis, vecMain.end());
     g_Log.EventDebug("Sizes: new vec %" PRId64 ", old vec %" PRId64 ", remove vec %" PRId64 ".\n",
         vecElemBuffer.size(), vecMain.size(), vecToRemove.size());
-    ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
 
-    /*
     for (auto& elem : vecToRemove) {
         g_Log.EventDebug("Should remove %p.\n", (void*)elem);
     }
@@ -867,7 +893,8 @@ static void unsortedVecDifference(
     for (auto& elem : vecElemBuffer) {
         g_Log.EventDebug("NewVec %p.\n", (void*)elem.second);
     }
-*/
+    ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
+
 }
 
 template <typename TPair, typename T>
@@ -889,6 +916,9 @@ static void sortedVecRemoveAddQueued(
     //EXC_SET_BLOCK("Ordered remove");
     if (!vecToRemove.empty())
     {
+        if (vecMain.empty())
+            ASSERT(false);  // Shouldn't ever happen.
+
         // TODO: test and benchmark if the approach of the above function (sortedVecRemoveElementsInPlace) might be faster.
         vecElemBuffer.clear();
         vecElemBuffer.reserve(vecMain.size() / 2);
@@ -1204,10 +1234,12 @@ void CWorldTicker::Tick()
                     EXC_CATCHSUB(ptcSubDesc);
                 }
             }
+/*
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
             else
                 g_Log.EventDebug("No ctimedobj ticks for this loop.\n");
 #endif
+*/
         }
     }
 
