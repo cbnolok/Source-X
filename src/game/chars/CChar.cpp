@@ -1115,7 +1115,7 @@ bool CChar::DupeFrom(const CChar * pChar, bool fNewbieItems )
 	m_atUnk.m_dwArg2 = pChar->m_atUnk.m_dwArg2;
 	m_atUnk.m_dwArg3 = pChar->m_atUnk.m_dwArg3;
 
-	_iTimeNextRegen = pChar->_iTimeNextRegen;
+    //_iTimeNextRegen = pChar->_iTimeNextRegen;
 	_iTimeCreate = pChar->_iTimeCreate;
 
 	_iTimeLastHitsUpdate = pChar->_iTimeLastHitsUpdate;
@@ -1260,7 +1260,7 @@ bool CChar::DupeFrom(const CChar * pChar, bool fNewbieItems )
 
 	FixWeight();
 
-	if (!pChar->IsSleeping())
+    if (!pChar->IsSleeping() && !IsSleeping())
 	{
 		_GoAwake();
 	}
