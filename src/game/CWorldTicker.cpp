@@ -113,6 +113,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
             _vecWorldObjsEraseRequested.begin(),
             _vecWorldObjsEraseRequested.end(),
             pTimedObject);
+        UnreferencedParameter(itFoundEraseRequest);
         ASSERT(_vecWorldObjsEraseRequested.end() == itFoundEraseRequest);
     }
 
@@ -669,6 +670,7 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
 //#ifdef DEBUG_LIST_OPS
     // Sanity Check: Verify that the removed elements are no longer present in vecMain
     for (auto index : vecIndicesToRemove) {
+        UnreferencedParameter(index);
         ASSERT(index < originalVecMain.size());
         ASSERT(std::find(vecMain.begin(), vecMain.end(), originalVecMain[index]) == vecMain.end());
     }
