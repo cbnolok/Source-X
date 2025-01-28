@@ -928,6 +928,7 @@ static void sortedVecRemoveAddQueued(
 
         for (auto& elem : vecToRemove) {
             auto it = std::find_if(vecElemBuffer.begin(), vecElemBuffer.end(), [elem](auto &rhs) {return elem == rhs.second;});
+            UnreferencedParameter(it);
             ASSERT (it == vecElemBuffer.end());
         }
         ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
@@ -1111,6 +1112,7 @@ void CWorldTicker::Tick()
                             [obj](TickingTimedObjEntry const& lhs) {
                                 return static_cast<CTimedObject*>(obj) == lhs.second;
                             });
+                        UnreferencedParameter(itit);
                         ASSERT(itit == _mWorldTickList.end());
                     }
                     EXC_CATCHSUB("");
