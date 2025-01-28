@@ -676,7 +676,7 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     }
 //#endif
 
-    g_Log.EventDebug("Sizes: new vec %" PRId64 ", old vec %" PRId64 ", remove vec %" PRId64 ".\n",
+    g_Log.EventDebug("Sizes: new vec %" PRIuSIZE_T ", old vec %" PRIuSIZE_T ", remove vec %" PRIuSIZE_T ".\n",
         vecMain.size(), sz, vecIndicesToRemove.size());
     ASSERT(vecMain.size() == sz - vecIndicesToRemove.size());
 
@@ -883,7 +883,7 @@ static void unsortedVecDifference(
 
     // Copy any remaining elements in vecMain after the last found element
     vecElemBuffer.insert(vecElemBuffer.end(), itCopyFromThis, vecMain.end());
-    g_Log.EventDebug("Sizes: new vec %" PRId64 ", old vec %" PRId64 ", remove vec %" PRId64 ".\n",
+    g_Log.EventDebug("Sizes: new vec %" PRIuSIZE_T ", old vec %" PRIuSIZE_T ", remove vec %" PRIuSIZE_T ".\n",
         vecElemBuffer.size(), vecMain.size(), vecToRemove.size());
 
     for (auto& elem : vecToRemove) {
