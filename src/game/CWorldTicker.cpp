@@ -122,7 +122,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
     _vecWorldObjsAddRequests.emplace_back(iTimeout, pTimedObject);
 
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
-    g_Log.EventDebug("[%p] -STATUS: Done adding CTimedObj in the ticking list with timeout %" PRId64 ".\n", (void*)pTimedObject, iTimeout);
+    g_Log.EventDebug("[%p] -STATUS: Done adding CTimedObj in the ticking list add buffer with timeout %" PRId64 ".\n", (void*)pTimedObject, iTimeout);
 #endif
 }
 
@@ -1153,7 +1153,9 @@ void CWorldTicker::Tick()
                                         continue;
                                 }
 
-                                pTimedObj->_ClearTimeout();
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+                                g_Log.EventDebug("Yes it should (%p).\n", reinterpret_cast<void*>(pTimedObj));
+#endif
                                 _vecGenericObjsToTick.emplace_back(static_cast<void*>(pTimedObj));
                                 _vecIndexMiscBuffer.emplace_back(uiProgressive);
                             }
@@ -1178,6 +1180,8 @@ void CWorldTicker::Tick()
                 {
                     EXC_TRYSUB("Delete from List");
                     sortedVecRemoveElementsByIndices(_mWorldTickList, _vecIndexMiscBuffer);
+
+#ifdef DEBUG_LIST_OPS
                     for (void* obj : _vecGenericObjsToTick) {
                         auto itit = std::find_if(_mWorldTickList.begin(), _mWorldTickList.end(),
                             [obj](TickingTimedObjEntry const& lhs) {
@@ -1186,6 +1190,7 @@ void CWorldTicker::Tick()
                         UnreferencedParameter(itit);
                         ASSERT(itit == _mWorldTickList.end());
                     }
+#endif
                     EXC_CATCHSUB("");
                 }
 
@@ -1205,6 +1210,8 @@ void CWorldTicker::Tick()
                     EXC_SETSUB_BLOCK("Elapsed");
 
                     CTimedObject* pTimedObj = static_cast<CTimedObject*>(pObjVoid);
+                    pTimedObj->_ClearTimeout();
+
 //#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
 //                    g_Log.EventDebug("Ticking CTimedObject %p.\n", reinterpret_cast<void*>(pTimedObj));
 //#endif
