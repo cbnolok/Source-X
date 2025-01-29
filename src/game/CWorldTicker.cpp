@@ -284,8 +284,22 @@ void CWorldTicker::DelTimedObject(CTimedObject* pTimedObject)
     {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
 #   ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING_VERBOSE
-        g_Log.EventDebug("[WorldTicker][%p] WARN: Requested deletion of CTimedObj, but Timeout is 0, so it shouldn't be in the list.\n", (void*)pTimedObject);
+        g_Log.EventDebug("[WorldTicker][%p] WARN: Requested deletion of CTimedObj, but Timeout is 0, so it shouldn't be in the list, or just queued to be removed.\n", (void*)pTimedObject);
 #   endif
+
+        const auto itEntryInRemoveList = std::find(
+            _vecWorldObjsEraseRequests.begin(),
+            _vecWorldObjsEraseRequests.end(),
+            pTimedObject);
+        if (itEntryInRemoveList != _vecWorldObjsEraseRequests.end())
+        {
+#   ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING_VERBOSE
+            g_Log.EventDebug("[WorldTicker][%p] WARN:   though, found it already in the removal list, so it's fine..\n", (void*)pTimedObject);
+#   endif
+
+            //ASSERT(false);
+            return;
+        }
 
         const auto itTickList = std::find_if(
             _mWorldTickList.begin(),
@@ -426,7 +440,7 @@ bool CWorldTicker::_RemoveCharTicking(CChar* pChar)
         if (itEntryInRemoveList == _vecPeriodicCharsEraseRequests.end()) {
             ASSERT(itEntryInTickList == _mCharTickList.end());
         }
-        else if (itEntryInRemoveList != _vecPeriodicCharsEraseRequests.end()) {
+        else {
             ASSERT(itEntryInTickList != _mCharTickList.end());
         }
 #endif
@@ -579,7 +593,7 @@ void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
         if (itEntryInEraseList != _vecPeriodicCharsEraseRequests.end())
         {
 #   ifdef DEBUG_CCHAR_PERIODIC_TICKING_VERBOSE
-            g_Log.EventDebug("[WorldTicker][%p] WARN:   though, found it in the removal list, so it's fine..\n", (void*)pChar);
+            g_Log.EventDebug("[WorldTicker][%p] WARN:   though, found it already in the removal list, so it's fine..\n", (void*)pChar);
 #   endif
 
             //ASSERT(false);
@@ -1023,13 +1037,13 @@ static void sortedVecRemoveAddQueued(
         vecElemBuffer.reserve(vecMain.size() / 2);
         unsortedVecDifference(vecMain, vecToRemove, vecElemBuffer);
 
+#ifdef DEBUG_LIST_OPS
         for (auto& elem : vecToRemove) {
             auto it = std::find_if(vecElemBuffer.begin(), vecElemBuffer.end(), [elem](auto &rhs) {return elem == rhs.second;});
             UnreferencedParameter(it);
             ASSERT (it == vecElemBuffer.end());
         }
 
-#ifdef DEBUG_LIST_OPS
         ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
         ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
         ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
