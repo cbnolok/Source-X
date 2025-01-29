@@ -88,12 +88,12 @@ private:
     std::vector<void*> _vecGenericObjsToTick;
     std::vector<size_t> _vecIndexMiscBuffer;
 
-    std::vector<TickingTimedObjEntry> _vecWorldObjsAddRequested;
-    std::vector<CTimedObject*> _vecWorldObjsEraseRequested;
+    std::vector<TickingTimedObjEntry> _vecWorldObjsAddRequests;
+    std::vector<CTimedObject*> _vecWorldObjsEraseRequests;
     std::vector<TickingTimedObjEntry> _vecWorldObjsElementBuffer;
 
-    std::vector<TickingPeriodicCharEntry> _vecPeriodicCharsToAddToList;
-    std::vector<CChar*> _vecPeriodicCharsToEraseFromList;
+    std::vector<TickingPeriodicCharEntry> _vecPeriodicCharsAddRequests;
+    std::vector<CChar*> _vecPeriodicCharsEraseRequests;
     std::vector<TickingPeriodicCharEntry> _vecPeriodicCharsElementBuffer;
 
     //----
