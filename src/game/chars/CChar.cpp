@@ -395,7 +395,7 @@ void CChar::DeleteCleanup(bool fForce)
 	}
 }
 
-// Called before Delete()
+// Called before Delete(). Notify the world/scripts that i'm going to delete this char.
 // @Destroy or f_onchar_delete can prevent the deletion
 bool CChar::NotifyDelete(bool fForce)
 {

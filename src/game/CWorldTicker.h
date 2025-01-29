@@ -57,18 +57,21 @@ public:
     ~CWorldTicker() = default;
 
 private:
+    // Generic Timers. Calls to OnTick.
     using TickingTimedObjEntry = std::pair<int64, CTimedObject*>;
     struct WorldTickList : public std::vector<TickingTimedObjEntry>
     {
         MT_CMUTEX_DEF;
     };
 
+    // Calls to OnTickPeriodic. Regens and periodic checks.
     using TickingPeriodicCharEntry = std::pair<int64, CChar*>;
     struct CharTickList : public std::vector<TickingPeriodicCharEntry>
     {
         MT_CMUTEX_DEF;
     };
 
+    // Calls to OnTickStatusUpdate. Periodically send updated infos to the clients.
     //struct StatusUpdatesList : public phmap::parallel_flat_hash_set<CObjBase*>
     //struct StatusUpdatesList : public fc::flat_set<CObjBase*>
     //struct StatusUpdatesList : public std::unordered_set<CObjBase*>

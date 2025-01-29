@@ -13,7 +13,7 @@
 #   define DEBUG_CTIMEDOBJ_TIMED_TICKING
 #   define DEBUG_CCHAR_PERIODIC_TICKING
 //#   define DEBUG_STATUSUPDATES
-//#   define DEBUG_LIST_OPS
+#   define DEBUG_LIST_OPS
 //#   define BENCHMARK_LISTS // TODO
 #endif
 
@@ -37,10 +37,12 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
     ASSERT(pTimedObject);
     ASSERT(iTimeout != 0);
 
-    DEBUG_ASSERT(sl::ContainerIsSorted(_mWorldTickList));
-    DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+    ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+    ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+#endif
 
-    const auto fnFindEntry = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
+    const auto fnFindEntryByObj = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
         return pTimedObject == rhs.second;
     };
 #if MT_ENGINES
@@ -50,7 +52,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
     const auto itEntryInAddList = std::find_if(
         _vecWorldObjsAddRequests.begin(),
         _vecWorldObjsAddRequests.end(),
-        fnFindEntry);
+        fnFindEntryByObj);
     if (_vecWorldObjsAddRequests.end() != itEntryInAddList)
     {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
@@ -78,7 +80,7 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
     const auto itEntryInTickList = std::find_if(
         _mWorldTickList.begin(),
         _mWorldTickList.end(),
-        fnFindEntry);
+        fnFindEntryByObj);
     if (_mWorldTickList.end() != itEntryInTickList)
     {
         if (itEntryInTickList->first == iTimeout)
@@ -88,36 +90,37 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 #endif
             return;
         }
+
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] WARN: Requested insertion of a CTimedObj already in the main ticking list.\n", (void*)pTimedObject);
-#endif
+
         const auto itEntryInEraseList = std::find(
             _vecWorldObjsEraseRequests.begin(),
             _vecWorldObjsEraseRequests.end(),
             pTimedObject);
         if (_vecWorldObjsEraseRequests.end() == itEntryInEraseList)
         {
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
             g_Log.EventDebug("[%p] WARN: But i didn't even requested to remove that!\n", (void*)pTimedObject);
-#endif
+
             ASSERT(false);
             return;
         }
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] WARN: But that's fine, because i already have requested to remove that!\n", (void*)pTimedObject);
 #endif
     }
+#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
     else
     {
-        const auto itFoundEraseRequest = std::find(
+        const auto itEntryInEraseList = std::find(
             _vecWorldObjsEraseRequests.begin(),
             _vecWorldObjsEraseRequests.end(),
             pTimedObject);
-        UnreferencedParameter(itFoundEraseRequest);
-        ASSERT(_vecWorldObjsEraseRequests.end() == itFoundEraseRequest);
+        ASSERT(_vecWorldObjsEraseRequests.end() == itEntryInEraseList);
     }
+#endif
 
     _vecWorldObjsAddRequests.emplace_back(iTimeout, pTimedObject);
+
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
     g_Log.EventDebug("[%p] -STATUS: Done adding CTimedObj in the ticking list with timeout %" PRId64 ".\n", (void*)pTimedObject, iTimeout);
 #endif
@@ -125,10 +128,12 @@ void CWorldTicker::_InsertTimedObject(const int64 iTimeout, CTimedObject* pTimed
 
 void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 {
-    DEBUG_ASSERT(sl::ContainerIsSorted(_mWorldTickList));
-    DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+#ifdef DEBUG_LIST_OPS
+    ASSERT(sl::ContainerIsSorted(_mWorldTickList));
+    ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+#endif
 
-    const auto fnFindEntry = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
+    const auto fnFindEntryByObj = [pTimedObject](TickingTimedObjEntry const& rhs) noexcept {
         return pTimedObject == rhs.second;
     };
 #if MT_ENGINES
@@ -139,13 +144,12 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
     const auto itEntryInTickList = std::find_if(
         _mWorldTickList.begin(),
         _mWorldTickList.end(),
-        fnFindEntry);
+        fnFindEntryByObj);
 
-    //bool fRemovedFromAddBuffer = false;
     const auto itEntryInAddList = std::find_if(
         _vecWorldObjsAddRequests.begin(),
         _vecWorldObjsAddRequests.end(),
-        fnFindEntry);
+        fnFindEntryByObj);
 
     const auto itEntryInRemoveList = std::find(
         _vecWorldObjsEraseRequests.begin(),
@@ -154,17 +158,19 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 
     if (itEntryInAddList != _vecWorldObjsAddRequests.end())
     {
+        _vecWorldObjsAddRequests.erase(itEntryInAddList);
+
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] INFO: Removing CTimedObj from the ticking list add buffer.\n", (void*)pTimedObject);
-#endif
-        _vecWorldObjsAddRequests.erase(itEntryInAddList);
-        //fRemovedFromAddBuffer = true;
+
         if (itEntryInRemoveList == _vecWorldObjsEraseRequests.end()) {
             ASSERT(itEntryInTickList == _mWorldTickList.end());
         }
         else if (itEntryInRemoveList != _vecWorldObjsEraseRequests.end()) {
             ASSERT(itEntryInTickList != _mWorldTickList.end());
         }
+#endif
+
         return;
     }
 
@@ -173,8 +179,8 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
         // I have already requested to remove this from the main ticking list.
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] WARN: CTimedObj removal from the main ticking list already requested.\n", (void*)pTimedObject);
-#endif
         ASSERT(itEntryInAddList == _vecWorldObjsAddRequests.end());
+#endif
         return; // Already requested the removal.
     }
 
@@ -186,15 +192,9 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 #endif
         return;
     }
-    /*
-    else
-    {
-        UnreferencedParameter(fRemovedFromAddBuffer);
-        DEBUG_ASSERT(!fRemovedFromAddBuffer);
-    }
-*/
 
     _vecWorldObjsEraseRequests.emplace_back(pTimedObject);
+
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
     g_Log.EventDebug("[%p] -STATUS: Done adding CTimedObj to the ticking list remove buffer.\n", (void*)pTimedObject);
 #endif
@@ -202,7 +202,7 @@ void CWorldTicker::_RemoveTimedObject(CTimedObject* pTimedObject)
 
 void CWorldTicker::AddTimedObject(const int64 iTimeout, CTimedObject* pTimedObject, bool fForce)
 {
-    //if (iTimeout < CWorldGameTime::GetCurrentTime().GetTimeRaw())    // We do that to get them tick as sooner as possible
+    //if (iTimeout < CWorldGameTime::GetCurrentTime().GetTimeRaw())    // We do that to get them tick as sooner as possible; don't uncomment.
     //    return;
 
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
@@ -269,6 +269,7 @@ void CWorldTicker::DelTimedObject(CTimedObject* pTimedObject)
     {
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] WARN: Requested deletion of CTimedObj, but Timeout is 0, so it shouldn't be in the list.\n", (void*)pTimedObject);
+
         const auto itTickList = std::find_if(
             _mWorldTickList.begin(),
             _mWorldTickList.end(),
@@ -304,42 +305,46 @@ void CWorldTicker::_InsertCharTicking(const int64 iTickNext, CChar* pChar)
 #endif
 
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
-    const auto fnFindEntry = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
+    const auto fnFindEntryByChar = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
         return pChar == rhs.second;
     };
-    const auto itFound = std::find_if(
+
+    const auto itEntryInAddList = std::find_if(
         _vecPeriodicCharsAddRequests.begin(),
         _vecPeriodicCharsAddRequests.end(),
-        fnFindEntry);
-    if (_vecPeriodicCharsAddRequests.end() != itFound)
+        fnFindEntryByChar);
+    if (_vecPeriodicCharsAddRequests.end() != itEntryInAddList)
     {
         g_Log.EventDebug("[%p] WARN: Periodic char insertion into ticking list already requested "
             "(requesting tick %" PRId64 ", previous requested tick %" PRId64 ").\n",
-            (void*)pChar, iTickNext, itFound->first);
+            (void*)pChar, iTickNext, itEntryInAddList->first);
+
         ASSERT(false);
         return; // Already requested the addition.
     }
 
-    const auto itFoundEraseRequest = std::find(
+    const auto itEntryInEraseList = std::find(
         _vecPeriodicCharsEraseRequests.begin(),
         _vecPeriodicCharsEraseRequests.end(),
         pChar);
-    if (_vecPeriodicCharsEraseRequests.end() != itFoundEraseRequest)
+    if (_vecPeriodicCharsEraseRequests.end() != itEntryInEraseList)
     {
         g_Log.EventDebug("[%p] WARN: Stopped insertion attempt of a CChar which removal from periodic ticking list has been requested!\n", (void*)pChar);
+
         ASSERT(false);
         return; // Already requested the removal.
     }
 
-    const auto itTickList = std::find_if(
+    const auto itEntryInTickList = std::find_if(
         _mCharTickList.begin(),
         _mCharTickList.end(),
-        fnFindEntry);
-    ASSERT(_mCharTickList.end() == itTickList);
+        fnFindEntryByChar);
+    ASSERT(_mCharTickList.end() == itEntryInTickList);
 #endif
 
     _vecPeriodicCharsAddRequests.emplace_back(iTickNext, pChar);
     pChar->_iTimePeriodicTick = iTickNext;
+
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
     g_Log.EventDebug("[%p] -STATUS: Done adding the CChar to the periodic ticking list add buffer.\n", (void*)pChar);
 #endif
@@ -354,15 +359,15 @@ bool CWorldTicker::_RemoveCharTicking(CChar* pChar)
     std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
 
-#ifdef DEBUG_CCHAR_PERIODIC_TICKING
-    const auto fnFindEntry = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
+    const auto fnFindEntryByChar = [pChar](TickingPeriodicCharEntry const& rhs) noexcept {
         return pChar == rhs.second;
     };
 
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
     const auto itEntryInTickList = std::find_if(
         _mCharTickList.begin(),
         _mCharTickList.end(),
-        fnFindEntry);
+        fnFindEntryByChar);
 
     const auto itEntryInRemoveList = std::find(
         _vecPeriodicCharsEraseRequests.begin(),
@@ -371,61 +376,66 @@ bool CWorldTicker::_RemoveCharTicking(CChar* pChar)
     if (_vecPeriodicCharsEraseRequests.end() != itEntryInRemoveList)
     {
         g_Log.EventDebug("[%p] WARN: TickingPeriodicChar erasure from ticking list already requested.\n", (void*)pChar);
+
         ASSERT(false);
         return false; // Already requested the removal.
     }
+#endif
 
     const auto itEntryInAddList = std::find_if(
         _vecPeriodicCharsAddRequests.begin(),
         _vecPeriodicCharsAddRequests.end(),
-        fnFindEntry);
+        fnFindEntryByChar);
     if (_vecPeriodicCharsAddRequests.end() != itEntryInAddList)
     {
         g_Log.EventDebug("[%p] INFO: Erasing TickingPeriodicChar from periodic char ticking list add buffer.\n", (void*)pChar);
+
         _vecPeriodicCharsAddRequests.erase(itEntryInAddList);
         pChar->_iTimePeriodicTick = 0;
 
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
         if (itEntryInRemoveList == _vecPeriodicCharsEraseRequests.end()) {
             ASSERT(itEntryInTickList == _mCharTickList.end());
         }
         else if (itEntryInRemoveList != _vecPeriodicCharsEraseRequests.end()) {
             ASSERT(itEntryInTickList != _mCharTickList.end());
         }
+#endif
         return true;
     }
 
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
     // Check if it's in the ticking list.
     if (itEntryInTickList == _mCharTickList.end())
     {
         g_Log.EventDebug("[%p] WARN: Requested TickingPeriodicChar removal from ticking list, but not found.\n", (void*)pChar);
+
         ASSERT(false);
         return false;
     }
 
-    //
-
     if (_vecPeriodicCharsEraseRequests.end() != itEntryInRemoveList)
     {
         // I have already requested to remove this from the main ticking list.
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
         g_Log.EventDebug("[%p] WARN: TickingPeriodicChar removal from the main ticking list already requested.\n", (void*)pChar);
-#endif
+
         ASSERT(itEntryInAddList == _vecPeriodicCharsAddRequests.end());
         return false; // Already requested the removal.
     }
+#endif
 
     if (itEntryInTickList == _mCharTickList.end())
     {
         // Not found. The object might have a timeout while being in a non-tickable state, so it isn't in the list.
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] WARN: Requested erasure of TimedObject in mWorldTickList, but it wasn't found.\n", (void*)pChar);
 #endif
         return false;
     }
-    #endif
 
     _vecPeriodicCharsEraseRequests.emplace_back(pChar);
     pChar->_iTimePeriodicTick = 0;
+
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
     g_Log.EventDebug("[%p] -STATUS: Done adding the CChar to the periodic ticking list remove buffer.\n", (void*)pChar);
 #endif
@@ -482,7 +492,10 @@ void CWorldTicker::AddCharTicking(CChar* pChar, bool fNeedsLock)
         EXC_SET_BLOCK("Remove");
         const bool fRet = _RemoveCharTicking(pChar);
         UnreferencedParameter(fRet);
-        DEBUG_ASSERT(fRet);
+
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
+        ASSERT(fRet);
+#endif
     }
 
     EXC_SET_BLOCK("Insert");
@@ -518,29 +531,31 @@ void CWorldTicker::DelCharTicking(CChar* pChar, bool fNeedsLock)
     {
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
         g_Log.EventDebug("[%p] WARN: Requested deletion of Periodic char, but Timeout is 0. It shouldn't be in the list, or just queued to be removed.\n", (void*)pChar);
-        auto fnFindEntry = [pChar](const TickingPeriodicCharEntry& entry) noexcept {
+        auto fnFindEntryByChar = [pChar](const TickingPeriodicCharEntry& entry) noexcept {
                 return entry.second == pChar;
         };
 
-        const auto itTickRemoveList = std::find(
+        const auto itEntryInEraseList = std::find(
             _vecPeriodicCharsEraseRequests.begin(),
             _vecPeriodicCharsEraseRequests.end(),
             pChar);
-        if (itTickRemoveList != _vecPeriodicCharsEraseRequests.end())
+        if (itEntryInEraseList != _vecPeriodicCharsEraseRequests.end())
         {
             g_Log.EventDebug("[%p] WARN:   though, found it in the removal list, so it's fine..\n", (void*)pChar);
+
             //ASSERT(false);
             return;
         }
 
-        const auto itTickList = std::find_if(
+        const auto itEntryInTickList = std::find_if(
             _mCharTickList.begin(),
             _mCharTickList.end(),
-            fnFindEntry);
-        if (itTickList != _mCharTickList.end())
+            fnFindEntryByChar);
+        if (itEntryInTickList != _mCharTickList.end())
         {
-            g_Log.EventDebug("[%p] WARN:   But i have found it in the list! With Timeout %" PRId64 ".\n", (void*)pChar, itTickList->first);
-            ASSERT(!!false);
+            g_Log.EventDebug("[%p] WARN:   But i have found it in the list! With Timeout %" PRId64 ".\n", (void*)pChar, itEntryInTickList->first);
+
+            ASSERT(false);
             return;
         }
 
@@ -568,7 +583,6 @@ void CWorldTicker::AddObjStatusUpdate(CObjBase* pObj, bool fNeedsLock) // static
 #if MT_ENGINES
         std::unique_lock<std::shared_mutex> lock(_ObjStatusUpdates.MT_CMUTEX);
 #endif
-        //_ObjStatusUpdates.insert(pObj);
 
         // Here i don't need to use an "add" buffer, like with CTimedObj, because this container isn't meant
         //  to be ordered and i can just push back stuff.
@@ -581,11 +595,13 @@ void CWorldTicker::AddObjStatusUpdate(CObjBase* pObj, bool fNeedsLock) // static
         {
 #ifdef DEBUG_STATUSUPDATES
             g_Log.EventDebug("[%p] WARN: Trying to add status update for duplicate CObjBase.\n", (void*)pObj);
+            ASSERT(false);
 #endif
             return;
         }
 
         _ObjStatusUpdates.emplace_back(pObj);
+
 #ifdef DEBUG_STATUSUPDATES
         g_Log.EventDebug("[%p] -STATUS: Done adding CObjBase to the status update list.\n", (void*)pObj);
 #endif
@@ -654,16 +670,16 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
     if (vecMain.empty())
         return;
 
-    size_t sz = vecMain.size();
-
-    DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
-    DEBUG_ASSERT(std::is_sorted(vecIndicesToRemove.begin(), vecIndicesToRemove.end()));
-    // Check that those sorted vectors do not have duplicated values.
-    DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
-    DEBUG_ASSERT(std::adjacent_find(vecIndicesToRemove.begin(), vecIndicesToRemove.end()) == vecIndicesToRemove.end());
+    const size_t sz = vecMain.size();
 
 #ifdef DEBUG_LIST_OPS
-    g_Log.EventDebug("Starting sortedVecRemoveElementsByIndices.\n");
+    ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
+    ASSERT(std::is_sorted(vecIndicesToRemove.begin(), vecIndicesToRemove.end()));
+    // Check that those sorted vectors do not have duplicated values.
+    ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end());
+    ASSERT(std::adjacent_find(vecIndicesToRemove.begin(), vecIndicesToRemove.end()) == vecIndicesToRemove.end());
+
+    //g_Log.EventDebug("Starting sortedVecRemoveElementsByIndices.\n");
 #endif
     // Copy the original vector to check against later
     std::vector<T> originalVecMain = vecMain;
@@ -685,23 +701,25 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
         }
 
 #ifdef DEBUG_LIST_OPS
-        g_Log.EventDebug("Removing contiguous indices: %" PRIuSIZE_T " to %" PRIuSIZE_T " (total sizes vecMain: %" PRIuSIZE_T ", vecIndices: %" PRIuSIZE_T ").\n",
+        /*
+         g_Log.EventDebug("Removing contiguous indices: %" PRIuSIZE_T " to %" PRIuSIZE_T " (total sizes vecMain: %" PRIuSIZE_T ", vecIndices: %" PRIuSIZE_T ").\n",
             *itRemoveFirst, *itRemoveLast, vecMain.size(), vecIndicesToRemove.size());
+        */
 #endif
 
         // Once we find a contiguous block, we erase that block from vecMain.
-        auto itRemoveLastPast = (*itRemoveLast == vecMain.size() - 1) ? vecMain.end() : vecMain.begin() + *itRemoveLast + 1;
+        auto itRemoveLastPast = (*itRemoveLast == vecMain.size() - 1) ? vecMain.end() : (vecMain.begin() + *itRemoveLast + 1);
         vecMain.erase(vecMain.begin() + *itRemoveFirst, itRemoveLastPast);
     }
 
-//#ifdef DEBUG_LIST_OPS
+#ifdef DEBUG_LIST_OPS
     // Sanity Check: Verify that the removed elements are no longer present in vecMain
     for (auto index : vecIndicesToRemove) {
         UnreferencedParameter(index);
         ASSERT(index < originalVecMain.size());
         ASSERT(std::find(vecMain.begin(), vecMain.end(), originalVecMain[index]) == vecMain.end());
     }
-//#endif
+#endif
 
     g_Log.EventDebug("Sizes: new vec %" PRIuSIZE_T ", old vec %" PRIuSIZE_T ", remove vec %" PRIuSIZE_T ".\n",
         vecMain.size(), sz, vecIndicesToRemove.size());
@@ -737,8 +755,10 @@ static void unsortedVecRemoveElementsByValues(std::vector<T>& vecMain, const std
     if (vecValuesToRemove.empty())
         return;
 
-    DEBUG_ASSERT(!sl::UnsortedContainerHasDuplicates(vecMain));
-    DEBUG_ASSERT(!sl::UnsortedContainerHasDuplicates(vecValuesToRemove));
+#ifdef DEBUG_LIST_OPS
+    ASSERT(!sl::UnsortedContainerHasDuplicates(vecMain));
+    ASSERT(!sl::UnsortedContainerHasDuplicates(vecValuesToRemove));
+#endif
 
     // Sort valuesToRemove for binary search
     //std::sort(vecValuesToRemove.begin(), vecValuesToRemove.end());
@@ -910,6 +930,8 @@ static void unsortedVecDifference(
 
     // Copy any remaining elements in vecMain after the last found element
     vecElemBuffer.insert(vecElemBuffer.end(), itCopyFromThis, vecMain.end());
+
+#ifdef DEBUG_LIST_OPS
     g_Log.EventDebug("Sizes: new vec %" PRIuSIZE_T ", old vec %" PRIuSIZE_T ", remove vec %" PRIuSIZE_T ".\n",
         vecElemBuffer.size(), vecMain.size(), vecToRemove.size());
 
@@ -923,7 +945,7 @@ static void unsortedVecDifference(
         g_Log.EventDebug("NewVec %p.\n", (void*)elem.second);
     }
     ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
-
+#endif
 }
 
 template <typename TPair, typename T>
@@ -931,16 +953,20 @@ static void sortedVecRemoveAddQueued(
     std::vector<TPair> &vecMain, std::vector<T> &vecToRemove, std::vector<TPair> &vecToAdd, std::vector<TPair> &vecElemBuffer
     )
 {
-    DEBUG_ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
-    DEBUG_ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end()); // no duplicate values
+#ifdef DEBUG_LIST_OPS
+    ASSERT(std::is_sorted(vecMain.begin(), vecMain.end()));
+    ASSERT(std::adjacent_find(vecMain.begin(), vecMain.end()) == vecMain.end()); // no duplicate values
+#endif
 
     //EXC_TRY("vecRemoveAddQueued");
     //EXC_SET_BLOCK("Sort intermediate lists");
     std::sort(vecToAdd.begin(), vecToAdd.end());
     std::sort(vecToRemove.begin(), vecToRemove.end());
 
-    DEBUG_ASSERT(std::adjacent_find(vecToAdd.begin(), vecToAdd.end()) == vecToAdd.end()); // no duplicate values
-    DEBUG_ASSERT(std::adjacent_find(vecToRemove.begin(), vecToRemove.end()) == vecToRemove.end()); // no duplicate values
+#ifdef DEBUG_LIST_OPS
+    ASSERT(std::adjacent_find(vecToAdd.begin(), vecToAdd.end()) == vecToAdd.end()); // no duplicate values
+    ASSERT(std::adjacent_find(vecToRemove.begin(), vecToRemove.end()) == vecToRemove.end()); // no duplicate values
+#endif
 
     //EXC_SET_BLOCK("Ordered remove");
     if (!vecToRemove.empty())
@@ -958,16 +984,20 @@ static void sortedVecRemoveAddQueued(
             UnreferencedParameter(it);
             ASSERT (it == vecElemBuffer.end());
         }
+
+#ifdef DEBUG_LIST_OPS
         ASSERT(vecElemBuffer.size() == vecMain.size() - vecToRemove.size());
-        DEBUG_ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
-        DEBUG_ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
+        ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
+        ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
+#endif
 
         vecMain.swap(vecElemBuffer);
 
         //vecMain = std::move(vecElemBuffer);
         vecElemBuffer.clear();
         vecToRemove.clear();
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+
+#ifdef DEBUG_LIST_OPS
         g_Log.EventDebug("[GLOBAL] STATUS: Nonempty tick list remove buffer processed.\n");
 #endif
     }
@@ -982,15 +1012,19 @@ static void sortedVecRemoveAddQueued(
             vecToAdd.begin(), vecToAdd.end(),
             std::back_inserter(vecElemBuffer)
             );
+
+#ifdef DEBUG_LIST_OPS
         ASSERT(vecElemBuffer.size() == vecMain.size() + vecToAdd.size());
-        DEBUG_ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
-        DEBUG_ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
+        ASSERT(std::is_sorted(vecElemBuffer.begin(), vecElemBuffer.end()));
+        ASSERT(std::adjacent_find(vecElemBuffer.begin(), vecElemBuffer.end()) == vecElemBuffer.end()); // no duplicate values
+#endif
 
         vecMain.swap(vecElemBuffer);
         //vecMain = std::move(vecElemBuffer);
         vecElemBuffer.clear();
         vecToAdd.clear();
-#ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
+
+#ifdef DEBUG_LIST_OPS
         g_Log.EventDebug("[GLOBAL] STATUS: Nonempty tick list add buffer processed.\n");
 #endif
     }
@@ -1073,8 +1107,10 @@ void CWorldTicker::Tick()
 #if MT_ENGINES
             std::unique_lock<std::shared_mutex> lock(_mWorldTickList.MT_CMUTEX);
 #endif
+#ifdef DEBUG_LIST_OPS
             ASSERT(sl::ContainerIsSorted(_mWorldTickList));
             ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+#endif
             {
                 // New requests done during the world loop.
                 EXC_TRYSUB("Update main list");
@@ -1084,8 +1120,11 @@ void CWorldTicker::Tick()
                 sortedVecRemoveAddQueued(_mWorldTickList, _vecWorldObjsEraseRequests, _vecWorldObjsAddRequests, _vecWorldObjsElementBuffer);
                 EXC_CATCHSUB("");
             }
+
+#ifdef DEBUG_LIST_OPS
             ASSERT(sl::ContainerIsSorted(_mWorldTickList));
             ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
+#endif
 
             // Need here a new, inner scope to get rid of EXC_TRYSUB variables
             if (!_mWorldTickList.empty())
@@ -1130,9 +1169,11 @@ void CWorldTicker::Tick()
                     EXC_CATCHSUB("");
                 }
 
+#ifdef DEBUG_LIST_OPS
                 ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
                 ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
                 ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
+#endif
 
                 {
                     EXC_TRYSUB("Delete from List");
@@ -1147,9 +1188,11 @@ void CWorldTicker::Tick()
                     }
                     EXC_CATCHSUB("");
                 }
+
+#ifdef DEBUG_LIST_OPS
                 ASSERT(sl::ContainerIsSorted(_mWorldTickList));
                 ASSERT(!sl::SortedContainerHasDuplicates(_mWorldTickList));
-
+#endif
 
                 // Done working with _mWorldTickList, we don't need the lock from now on.
 
@@ -1295,10 +1338,14 @@ void CWorldTicker::Tick()
         std::unique_lock<std::shared_mutex> lock(_mCharTickList.MT_CMUTEX);
 #endif
         {
+#ifdef DEBUG_LIST_OPS
             ASSERT(sl::ContainerIsSorted(_mCharTickList));
             ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
+#endif
+
             // New requests done during the world loop.
             EXC_TRYSUB("Update main list");
+
 #ifdef DEBUG_CTIMEDOBJ_TIMED_TICKING
             g_Log.EventDebug("[GLOBAL] STATUS: Updating CharTickList.\n");
 #endif
@@ -1348,10 +1395,11 @@ void CWorldTicker::Tick()
                 }
                 EXC_CATCHSUB("");
 
-                DEBUG_ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
-                DEBUG_ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
-                DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
-
+#ifdef DEBUG_LIST_OPS
+                ASSERT(sl::ContainerIsSorted(_vecIndexMiscBuffer));
+                ASSERT(!sl::UnsortedContainerHasDuplicates(_vecGenericObjsToTick));
+                ASSERT(!sl::SortedContainerHasDuplicates(_vecIndexMiscBuffer));
+#endif
 
 #ifdef DEBUG_CCHAR_PERIODIC_TICKING
                 //g_Log.EventDebug("Done looping through char periodic ticks. Need to tick n %" PRIuSIZE_T " objs.\n", _vecGenericObjsToTick.size());
@@ -1366,9 +1414,11 @@ void CWorldTicker::Tick()
 
                 _vecIndexMiscBuffer.clear();
             }
-            DEBUG_ASSERT(sl::ContainerIsSorted(_mCharTickList));
-            DEBUG_ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
 
+#ifdef DEBUG_LIST_OPS
+            ASSERT(sl::ContainerIsSorted(_mCharTickList));
+            ASSERT(!sl::SortedContainerHasDuplicates(_mCharTickList));
+#endif
 
             // Done working with _mCharTickList, we don't need the lock from now on.
         }
