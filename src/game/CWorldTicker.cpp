@@ -388,12 +388,12 @@ bool CWorldTicker::_RemoveCharTicking(CChar* pChar)
         return pChar == rhs.second;
     };
 
-#ifdef DEBUG_CCHAR_PERIODIC_TICKING
     const auto itEntryInTickList = std::find_if(
         _mCharTickList.begin(),
         _mCharTickList.end(),
         fnFindEntryByChar);
 
+#ifdef DEBUG_CCHAR_PERIODIC_TICKING
     const auto itEntryInRemoveList = std::find(
         _vecPeriodicCharsEraseRequests.begin(),
         _vecPeriodicCharsEraseRequests.end(),
@@ -766,6 +766,7 @@ static void sortedVecRemoveElementsByIndices(std::vector<T>& vecMain, const std:
         vecMain.size(), sz, vecIndicesToRemove.size());
 #endif
 
+    UnreferencedParameter(sz);
     ASSERT(vecMain.size() == sz - vecIndicesToRemove.size());
 
 
