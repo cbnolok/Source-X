@@ -1367,7 +1367,7 @@ void Str_MakeUnQuoted(tchar* pStr) noexcept
 
     tchar* endPtr = src + std::strlen(src);
 
-    // If quoted, locate servClosing quote and adjust endPtr
+    // If quoted, locate closing quote and adjust endPtr
     if (fQuoted)
     {
         tchar* p = endPtr;
@@ -1804,7 +1804,7 @@ MATCH_TYPE Str_Match(const tchar * pPattern, const tchar * pText) noexcept
                     fInvert = true;
                     ++pPattern;
                 }
-                // if servClosing bracket here or at range start then we have a
+                // if closing bracket here or at range start then we have a
                 // malformed pattern
                 if (*pPattern == ']')
                     return MATCH_PATTERN;
