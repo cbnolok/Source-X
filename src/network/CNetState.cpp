@@ -17,6 +17,10 @@
 #define NETWORK_DISCONNECTPRI	PacketSend::PRI_HIGHEST			// packet priorty to continue sending before closing sockets
 
 
+#ifdef UNIT_TESTING
+CNetStateTestSink::~CNetStateTestSink() = default;
+#endif
+
 CNetState::CNetState(int id) :
     m_outgoing{}, m_incoming{}
 {
@@ -358,6 +362,10 @@ bool CNetState::canReceive(PacketSend* packet) const
 void CNetState::beginTransaction(int priority)
 {
     ADDTOCALLSTACK("CNetState::beginTransaction");
+#ifdef UNIT_TESTING
+    if (_pUnitTestSink != nullptr)
+        return;     // A fake client of the unit tests: the packets go to the test one by one.
+#endif
     if (m_outgoing.pendingTransaction != nullptr)
     {
         DEBUGNETWORK(("%x:New network transaction started whilst a previous is still open.\n", id()));

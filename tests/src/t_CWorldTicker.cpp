@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include "CWorldTestAccess.h"
 #include "../../src/game/CWorld.h"
 #include "../../src/game/CWorldGameTime.h"
 #include "../../src/game/CWorldTickingList.h"
@@ -14,44 +15,6 @@
 
 // What the tick of an object does to another object expiring in the same tick, waiting for its turn in the same pass.
 // These cases run the world ticker (g_World), without loading a world.
-
-struct CWorldTestAccess
-{
-    // The time of the world only moves forward between the cases: the timing wheel keeps its current time.
-    static void AdvanceTime(int64 iMsecs)
-    {
-        static int64 s_iTime = 1'000'000'000;
-        s_iTime += iMsecs;
-        g_World._GameClock.InitTime(s_iTime);
-    }
-
-    static void Tick()
-    {
-        g_World._Ticker.Tick();
-    }
-
-    // Objects whose deletion was scheduled (CWorldThread::ScheduleObjDeletion), destroyed by the next garbage collection.
-    static size_t CountScheduledDeletions()
-    {
-        return g_World.m_ObjDelete.GetContentCount();
-    }
-    static void DestroyScheduledDeletions()
-    {
-        g_World.m_ObjDelete.ClearContainer(false);
-    }
-
-    // What CWorld::GarbageCollection does (a world save too, with SAVEGARBAGECOLLECT), without changing the server mode.
-    static void CollectGarbage()
-    {
-        g_World.GarbageCollection_UIDs();
-    }
-
-    // Called in the turn of each char in the periodic ticks, before its tick.
-    static void SetCharTurnHook(void (*pfnHook)(CChar*))
-    {
-        g_World._Ticker._pfnUnitTestCharTurn = pfnHook;
-    }
-};
 
 namespace
 {
@@ -490,7 +453,6 @@ TEST_CASE("CWorldTicker a garbage collection run by a tick doesn't destroy the o
     REQUIRE(g_World.FindUID(pUnplaced->GetUID().GetObjUID()) == pUnplaced);
     REQUIRE(g_World.IsObjIdle(pUnplaced));
     const dword uiObjs = CObjBase::sm_iCount;
-
     int iTicks = 0;
     TestTimer timer(&iTicks);
     timer.SetTimeout(10);

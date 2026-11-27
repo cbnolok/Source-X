@@ -29,6 +29,17 @@
 class CClient;
 class CNetworkThread;
 
+#ifdef UNIT_TESTING
+// A fake client of the unit tests (tests/src/fixture/CFakeClient.h): its state has no socket and no network thread,
+//  the packets sent to it are given to this.
+class CNetStateTestSink
+{
+public:
+    virtual ~CNetStateTestSink();
+    virtual void OnPacketSent(PacketSend* pPacket) = 0;	// It takes the packet.
+};
+#endif
+
 class CNetState
 {
 protected:
@@ -85,6 +96,11 @@ protected:
     int64 _iInByteCounter;    // number of bytes received by this client since the last legitimacy check
     int64 _iOutByteCounter;   // number of bytes sent     by this client since the last legitimacy check
 
+#ifdef UNIT_TESTING
+    friend struct CNetTestAccess;
+    CNetStateTestSink* _pUnitTestSink = nullptr;
+#endif
+
 public:
     GAMECLIENT_TYPE m_clientType;	// type of client
     dword m_clientVersionNumber;			// client version (encryption)
@@ -133,6 +149,10 @@ public:
     bool needsFlush(void) const volatile noexcept{ return m_needsFlush; } // does the socket need to be flushed?
 
     CClient* getClient(void) const { return m_client; } // get linked client
+
+#ifdef UNIT_TESTING
+    CNetStateTestSink* getUnitTestSink(void) const noexcept { return _pUnitTestSink; }
+#endif
 
     bool isClient3D(void) const { return m_clientType == CLIENTTYPE_3D; }; // is this a 3D client?
     bool isClientKR(void) const { return m_clientType == CLIENTTYPE_KR; }; // is this a KR client?

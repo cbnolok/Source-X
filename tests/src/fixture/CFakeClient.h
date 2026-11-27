@@ -1,0 +1,71 @@
+#ifndef _INC_CFAKECLIENT_H
+#define _INC_CFAKECLIENT_H
+
+#include "../../../src/common/sphereproto.h"
+#include "../../../src/network/CNetState.h"
+#include "../../../src/game/uo_files/uofiles_enums_creid.h"
+#include <memory>
+#include <vector>
+
+class CAccount;
+class CChar;
+class CClient;
+struct CPointMap;
+
+// A game client without a socket, for the integration tests (with CTestEngine). It has its own network state, in the
+//  list of the clients (it sees the others and they see it), an account, and once logged in a player char.
+// The packets the server sends to it are kept (GetSent): the network state gives them to it instead of a network
+//  thread. The packets it sends (Receive) go to the handlers as the network input gives them, after the decryption.
+// The packet transactions are off: each packet comes alone.
+// Its destruction deletes the account and its chars, then destroys the objects scheduled for deletion (as at the end of
+//  a tick): those the test deleted too.
+class CFakeClient final : public CNetStateTestSink
+{
+public:
+    static constexpr dword kdwDefaultVersion = MINCLIVER_TOL;   // 7.0.45.65
+
+    explicit CFakeClient(dword dwReportedVersion = kdwDefaultVersion);
+    ~CFakeClient() override;
+
+    CFakeClient(const CFakeClient&) = delete;
+    CFakeClient& operator=(const CFakeClient&) = delete;
+
+    CClient* GetClient() const noexcept;
+    CNetState* GetNetState() const noexcept
+    {
+        return _pState.get();
+    }
+    CAccount* GetAccount() const noexcept
+    {
+        return _pAccount;
+    }
+    CChar* GetChar() const noexcept;
+
+    // A new player char of the account enters the world at that point, as after the char selection: it's placed (logged
+    //  out), then CClient::addPlayerStart. The objects need a UID: call it in a CTestRunModeScope.
+    CChar* Login(const CPointMap& pt, CREID_TYPE id = CREID_MAN);
+
+    // The client sends these bytes: one or more packets.
+    void Receive(const std::vector<byte>& vData);
+
+    // The packets the server sent, in order.
+    const std::vector<std::vector<byte>>& GetSent() const noexcept
+    {
+        return _vSent;
+    }
+    size_t CountSent(byte bId) const;
+    const std::vector<byte>* FindLastSent(byte bId) const;
+    void ClearSent() noexcept
+    {
+        _vSent.clear();
+    }
+
+private:
+    void OnPacketSent(PacketSend* pPacket) override;
+
+    std::unique_ptr<CNetState> _pState;
+    CAccount* _pAccount;
+    std::vector<std::vector<byte>> _vSent;
+};
+
+#endif // _INC_CFAKECLIENT_H

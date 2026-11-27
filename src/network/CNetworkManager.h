@@ -72,6 +72,9 @@ private:
 
     friend class ClientIterator;
     friend class NetworkThreadStateIterator;
+#ifdef UNIT_TESTING
+    friend struct CNetTestAccess;   // The fake clients of the unit tests.
+#endif
     friend class CNetworkThread;
     friend class CNetworkInput;
     friend class CNetworkOutput;

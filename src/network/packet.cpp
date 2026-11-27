@@ -1266,6 +1266,13 @@ void PacketSend::send(const CClient *client, bool appendTransaction)
 	if (sync() > NETWORK_MAXPACKETLEN)
 		return;
 
+#ifdef UNIT_TESTING
+	if (CNetStateTestSink* pSink = m_target->getUnitTestSink())
+	{
+		pSink->OnPacketSent(this->clone());	// A fake client of the unit tests: no network thread.
+		return;
+	}
+#endif
 	m_target->getParentThread()->queuePacket(this->clone(), appendTransaction);
 }
 
@@ -1293,6 +1300,13 @@ void PacketSend::push(const CClient *client, bool appendTransaction)
 		return;
 	}
 
+#ifdef UNIT_TESTING
+	if (CNetStateTestSink* pSink = m_target->getUnitTestSink())
+	{
+		pSink->OnPacketSent(this);	// A fake client of the unit tests: no network thread.
+		return;
+	}
+#endif
 	m_target->getParentThread()->queuePacket(this, appendTransaction);
 }
 
