@@ -28,9 +28,11 @@ private:
     struct CDesignDetails
     {
         int m_iRevision;
-        std::vector<CMultiComponent*> m_vectorComponents;
+        std::vector<CMultiComponent*> m_vectorComponents;   // Owned: a component taken out of it is deleted.
         PacketHouseDesign* m_pData;
         int m_iDataRevision;
+
+        void ClearComponents() noexcept;    // Deletes the components and empties the list.
     };
 
     class CSphereMultiCustom : public CUOMulti
@@ -102,7 +104,12 @@ public:
     void AddStairs(CClient * pClientSrc, ITEMID_TYPE id, int16 x, int16 y, int8 z = INT8_MIN);
     void AddRoof(CClient * pClientSrc, ITEMID_TYPE id, int16 x, int16 y, int8 z);
     void RemoveItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x, int16 y, int8 z);
-    bool RemoveStairs(CMultiComponent * pStairComponent);
+    struct CDirtTile    // A dirt tile to add on the ground floor, where a floor piece of a stair was.
+    {
+        int16 x, y;
+        int8 z;
+    };
+    bool RemoveStairs(CMultiComponent * pStairComponent, std::vector<CDirtTile>& vDirtTiles);
     void RemoveRoof(CClient * pClientSrc, ITEMID_TYPE id, int16 x, int16 y, int8 z);
     void SendVersionTo(CClient * pClientSrc) const;
     void SendStructureTo(CClient * pClientSrc);

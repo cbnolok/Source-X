@@ -52,37 +52,36 @@ CItemMultiCustom::~CItemMultiCustom()
         delete m_pSphereMulti;
     }
 
-    for (CMultiComponent* pComp : m_designMain.m_vectorComponents)
-        delete pComp;
-    m_designMain.m_vectorComponents.clear();
+    m_designMain.ClearComponents();
     if (m_designMain.m_pData != nullptr)
     {
         delete m_designMain.m_pData;
     }
 
-    for (CMultiComponent* pComp : m_designWorking.m_vectorComponents)
-        delete pComp;
-    m_designWorking.m_vectorComponents.clear();
+    m_designWorking.ClearComponents();
     if (m_designWorking.m_pData != nullptr)
     {
         delete m_designWorking.m_pData;
     }
 
-    for (CMultiComponent* pComp : m_designBackup.m_vectorComponents)
-        delete pComp;
-    m_designBackup.m_vectorComponents.clear();
+    m_designBackup.ClearComponents();
     if (m_designBackup.m_pData != nullptr)
     {
         delete m_designBackup.m_pData;
     }
 
-    for (CMultiComponent* pComp : m_designRevert.m_vectorComponents)
-        delete pComp;
-    m_designRevert.m_vectorComponents.clear();
+    m_designRevert.ClearComponents();
     if (m_designRevert.m_pData != nullptr)
     {
         delete m_designRevert.m_pData;
     }
+}
+
+void CItemMultiCustom::CDesignDetails::ClearComponents() noexcept
+{
+    for (CMultiComponent* pComp : m_vectorComponents)
+        delete pComp;
+    m_vectorComponents.clear();
 }
 
 void CItemMultiCustom::BeginCustomize(CClient* pClientSrc, bool continueCustomize)
@@ -300,6 +299,7 @@ void CItemMultiCustom::CommitChanges(CClient * pClientSrc)
                 const TRIGRET_TYPE iRet = pCharClient->OnTrigger(CTRIG_HouseDesignCommitItem, pScriptArgs, pCharClient);
                 if (iRet == TRIGRET_RET_FALSE)
                 {
+                    delete pComp;
                     it = m_designWorking.m_vectorComponents.erase(it);
                     continue;
                 }
@@ -525,18 +525,20 @@ void CItemMultiCustom::AddItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x, in
         }
         */
 
-        // remove previous item(s) in this location
+        // remove previous item(s) in this location. Their values are copied first: a removal can remove the others found
+        //  here (RemoveItem removes all those of its ID at the location, as two of a loaded design), and destroys them.
         iCount = GetComponentsAt(x, y, z, pPrevComponents, &m_designWorking);
-        if (iCount > 0)
+        CUOMultiItemRec_HS aPrevItems[INT8_MAX];
+        size_t uiPrevItems = 0;
+        for (size_t i = 0; i < iCount; ++i)
         {
-            for (size_t i = 0; i < iCount; ++i)
-            {
-                if (fFloor != pPrevComponents[i]->m_isFloor)
-                    continue;
-
-                const CMultiComponent* pComp = pPrevComponents[i];
-                RemoveItem(nullptr, pComp->m_item.GetDispID(), pComp->m_item.m_dx, pComp->m_item.m_dy, (char)(pComp->m_item.m_dz));
-            }
+            if (fFloor == pPrevComponents[i]->m_isFloor)
+                aPrevItems[uiPrevItems++] = pPrevComponents[i]->m_item;
+        }
+        for (size_t i = 0; i < uiPrevItems; ++i)
+        {
+            const CUOMultiItemRec_HS& prev = aPrevItems[i];
+            RemoveItem(nullptr, prev.GetDispID(), prev.m_dx, prev.m_dy, (char)(prev.m_dz));
         }
     }
 
@@ -737,6 +739,10 @@ void CItemMultiCustom::RemoveItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x,
 
     bool fComponentsChanged = false;
     auto& vectorComponents = m_designWorking.m_vectorComponents;
+    // The dirt tiles of a stair removed are added after the walk: the stair removal destroys its pieces, some of them can be
+    //  among those found here, and a component allocated before the walk is done could get the address of one, and be
+    //  taken for it (only pointers are compared).
+    std::vector<CDirtTile> vStairDirtTiles;
 
 	/*
 	if (fAllowRemoveWholeFloor && (uiPlaneAtZ > 1))
@@ -779,6 +785,7 @@ void CItemMultiCustom::RemoveItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x,
 					CMultiComponent* pComp = *it;
 					if ((pComp->m_isFloor) && (pComp->m_item.m_dz == z))
 					{
+						delete pComp;
 						it = vectorComponents.erase(it);
 						fComponentsChanged = true;
 					}
@@ -802,13 +809,14 @@ void CItemMultiCustom::RemoveItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x,
             if (id != ITEMID_NOTHING && (pComp->m_item.GetDispID() != id))
                 break;
 
-            if (pClientSrc != nullptr && RemoveStairs(pComp))
+            if (pClientSrc != nullptr && RemoveStairs(pComp, vStairDirtTiles))
                 break;
 
             // floor tiles the ground floor are replaced with dirt tiles
             if ((pComp->m_item.GetDispID() != ITEMID_DIRT_TILE) && pComp->m_isFloor && (GetPlane(pComp) == 1) && (GetPlaneZ(GetPlane(pComp)) == pComp->m_item.m_dz))
                 fReplaceDirt = true;
 
+            delete pComp;
             vectorComponents.erase(it);
             fComponentsChanged = true;
             break;
@@ -817,6 +825,9 @@ void CItemMultiCustom::RemoveItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x,
 
     if (fComponentsChanged)
         ++m_designWorking.m_iRevision;
+
+    for (const CDirtTile& tile : vStairDirtTiles)
+        AddItem(nullptr, ITEMID_DIRT_TILE, tile.x, tile.y, tile.z);
 
     if (pClientSrc != nullptr && fReplaceDirt)
     {
@@ -828,13 +839,15 @@ void CItemMultiCustom::RemoveItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x,
     SendStructureTo(pClientSrc);
 }
 
-bool CItemMultiCustom::RemoveStairs(CMultiComponent * pStairComponent)
+bool CItemMultiCustom::RemoveStairs(CMultiComponent * pStairComponent, std::vector<CDirtTile>& vDirtTiles)
 {
     ADDTOCALLSTACK("CItemMultiCustom::RemoveStairs");
     // attempt to remove the given component as a stair piece,
     // removing all 'linked' stair pieces along with it
     // return false means that the passed component was not a
     // stair piece and should be removed normally
+    // The pieces are destroyed (the given one too). The dirt tiles that replace the floor pieces on the ground floor are
+    //  added to vDirtTiles, for the caller to add (AddItem) once it no longer uses the components it found.
     if (pStairComponent == nullptr)
         return false;
 
@@ -848,23 +861,16 @@ bool CItemMultiCustom::RemoveStairs(CMultiComponent * pStairComponent)
         CMultiComponent* pComp = *it;
         if (pComp->m_isStair == iStairID)
         {
-            bool fReplaceDirt = false;
             if (pComp->m_isFloor)
             {
                 const uchar uiCompPlane = GetPlane(pComp);
                 if ((uiCompPlane == 1) && (GetPlaneZ(uiCompPlane) == pComp->m_item.m_dz))
-                    fReplaceDirt = true;
+                    vDirtTiles.push_back({pComp->m_item.m_dx, pComp->m_item.m_dy, n16_narrow_n8(pComp->m_item.m_dz)});
             }
 
-            int16 x = pComp->m_item.m_dx;
-            int16 y = pComp->m_item.m_dy;
-            int8 z = n16_narrow_n8(pComp->m_item.m_dz);
-
+            delete pComp;
             it = m_designWorking.m_vectorComponents.erase(it);
             ++ m_designWorking.m_iRevision;
-
-            if (fReplaceDirt)
-                AddItem(nullptr, ITEMID_DIRT_TILE, x, y, z);
         }
         else
         {
@@ -1081,7 +1087,7 @@ void CItemMultiCustom::ResetStructure(CClient * pClientSrc)
     // return the building design to it's original state, which
     // is simply the 'foundation' design from the multi.mul file
 
-    m_designWorking.m_vectorComponents.clear();
+    m_designWorking.ClearComponents();
     ++ m_designWorking.m_iRevision;
     const CUOMulti * pMulti = g_Cfg.GetMultiItemDefs(GetID());
     if (pMulti != nullptr)
@@ -1281,7 +1287,7 @@ void CItemMultiCustom::CopyDesign(CDesignDetails * designFrom, CDesignDetails * 
     CMultiComponent * pComponent;
 
     // copy components
-    designTo->m_vectorComponents.clear();
+    designTo->ClearComponents();
     for (auto i = designFrom->m_vectorComponents.begin(); i != designFrom->m_vectorComponents.end(); ++i)
     {
         pComponent = new CMultiComponent;
@@ -1464,6 +1470,7 @@ void CItemMultiCustom::ClearFloor(int8 iFloor)
         }
         if (comp->m_item.m_dz >= iMinZ && comp->m_item.m_dz <= iMaxZ)
         {
+            delete comp;
             m_designMain.m_vectorComponents.erase(m_designMain.m_vectorComponents.begin()+i);
             ++ m_designMain.m_iRevision;
             continue;
@@ -1584,7 +1591,7 @@ bool CItemMultiCustom::r_Verb(CScript & s, CTextConsole * pSrc) // Execute comma
 
         case IMCV_CLEAR:
         {
-            m_designWorking.m_vectorComponents.clear();
+            m_designWorking.ClearComponents();
             ++ m_designWorking.m_iRevision;
         }
         break;
