@@ -1462,13 +1462,12 @@ void CItemMulti::TransferLockdownsToMovingCrate()
     }
     for (size_t i = 0; i < _lLockDowns.size(); ++i)
     {
-        CItem *pItem = _lLockDowns[i].ItemFind();
+        const CUID uidItem = _lLockDowns[i];
+        CItem *pItem = uidItem.ItemFind();
         if (pItem)  // Move all valid items.
         {
-            pItem->r_ExecSingle("EVENTS -ei_house_lockdown");
+            UnlockItem(uidItem, false);     // The attribute, the link, the event, and the TAG naming the house.
             pCrate->ContentAdd(pItem);
-            pItem->ClrAttr(ATTR_LOCKEDDOWN);
-            pItem->m_uidLink.InitUID();
         }
     }
     _lLockDowns.clear();    // Clear the list, asume invalid items should be cleared too.
@@ -1488,16 +1487,15 @@ void CItemMulti::TransferSecuredToMovingCrate()
     }
     for (size_t i = 0; i < _lSecureContainers.size(); ++i)
     {
-        CItemContainer *pItem = static_cast<CItemContainer*>(_lSecureContainers[i].ItemFind());
+        const CUID uidContainer = _lSecureContainers[i];
+        CItemContainer *pItem = static_cast<CItemContainer*>(uidContainer.ItemFind());
         if (pItem)  // Move all valid items.
         {
-            pItem->r_ExecSingle("EVENTS -ei_house_secure");
+            Release(uidContainer, false);   // The attribute, the link, the event, and the container's link to the house.
             pCrate->ContentAdd(pItem);
-            pItem->ClrAttr(ATTR_SECURE);
-            pItem->m_uidLink.InitUID();
         }
     }
-    _lLockDowns.clear();    // Clear the list, asume invalid items should be cleared too.
+    _lSecureContainers.clear();    // Clear the list, asume invalid items should be cleared too.
 }
 
 void CItemMulti::RedeedAddons()
@@ -1784,7 +1782,7 @@ void CItemMulti::LockItem(const CUID& uidItem)
         pItem->m_uidLink = GetUID();
         pItem->r_ExecSingle("EVENTS +ei_house_lockdown");
     }
-    pItem->SetLockDownOfMulti(uidItem);
+    pItem->SetLockDownOfMulti(GetUID());
     _lLockDowns.emplace_back(uidItem);
 }
 
@@ -1793,7 +1791,11 @@ void CItemMulti::UnlockItem(const CUID& uidItem, bool fRemoveFromList)
     ADDTOCALLSTACK("CItemMulti::UnlockItem");
     if (fRemoveFromList)
     {
-        _lLockDowns.erase(std::find(_lLockDowns.begin(), _lLockDowns.end(), uidItem));
+        // A UID that isn't in the list (UNLOCKITEM of a script, an item whose TAG outlived the list) removes nothing:
+        //  erase(end()) is undefined (it dropped the last lockdown, or broke an empty list).
+        const auto itLockDown = std::find(_lLockDowns.begin(), _lLockDowns.end(), uidItem);
+        if (itLockDown != _lLockDowns.end())
+            _lLockDowns.erase(itLockDown);
     }
 
     CItem *pItem = uidItem.ItemFind();
@@ -1873,11 +1875,15 @@ void CItemMulti::Release(const CUID& uidContainer, bool fRemoveFromList)
     // remove from secured list
     if (fRemoveFromList)
     {
-        _lSecureContainers.erase(std::find(_lSecureContainers.begin(), _lSecureContainers.end(), uidContainer));
+        // As UnlockItem: a UID that isn't in the list (RELEASE of a script) removes nothing.
+        const auto itSecured = std::find(_lSecureContainers.begin(), _lSecureContainers.end(), uidContainer);
+        if (itSecured != _lSecureContainers.end())
+            _lSecureContainers.erase(itSecured);
     }
 
-    // remove container from secure
-    CItemContainer *pContainer = static_cast<CItemContainer*>(uidContainer.ItemFind());
+    // remove container from secure: only a container is secured (RELEASE of a script can name any item, and a CItem was
+    //  written as a container, past its members).
+    CItemContainer *pContainer = dynamic_cast<CItemContainer*>(uidContainer.ItemFind());
     if (!pContainer)
     {
         return;

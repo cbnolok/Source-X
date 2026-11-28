@@ -1,15 +1,23 @@
 // The design of a custom house (CItemMultiCustom): the components taken out of a design are destroyed (they were
 //  leaked: by a backup, a restore, a commit, a reset, a removal), and the operations that remove some while they use
 //  others (the components a new one replaces, the pieces of a stair) keep working. The leak check needs LeakSanitizer.
+// And the lists of a house (CItemMulti) of its locked down items and secured containers: they follow their items (an item
+//  destroyed, released, moved to the moving crate leaves them), a UID not in them changes nothing, and RELEASE changes
+//  only a container.
 
 #include <doctest/doctest.h>
 #include "fixture/CFakeClient.h"
 #include "fixture/CTestEngine.h"
 #include "fixture/CTestObjects.h"
+#include "CWorldTestAccess.h"
+#include "../../src/common/CScript.h"
+#include "../../src/game/items/CItemContainer.h"
 #include "../../src/game/items/CItemMultiCustom.h"
 #include "../../src/game/CObjBase.h"
 #include "../../src/game/CServer.h"
+#include <cstdio>
 #include <string_view>
+#include <vector>
 
 #if defined(__SANITIZE_ADDRESS__) && !defined(_MSC_VER)
 #   define TEST_LEAK_CHECK 1
@@ -27,6 +35,7 @@ namespace
     constexpr ITEMID_TYPE kidHouse = ITEMID_TYPE(ITEMID_MULTI + 0x13ee);
     constexpr ITEMID_TYPE kidWall = ITEMID_TYPE(0x0064);    // Not a floor (a unit high).
     constexpr ITEMID_TYPE kidFloor = CTestEngine::kidFloorTile;
+    constexpr ITEMID_TYPE kidLockable = ITEMID_TYPE(0x0a2a);  // An item to lock down that doesn't stack (gold in the crate would).
 
     constexpr std::string_view kScript = R"(
 [MULTIDEF 013ee]
@@ -50,6 +59,10 @@ NAME=floor
 [ITEMDEF 031f4]
 DEFNAME=i_fixture_design_dirt
 NAME=dirt
+
+[ITEMDEF 0a2a]
+DEFNAME=i_fixture_lockable
+NAME=stool
 )";
 
     // The first floor of the house (plane 1): a client can remove any component there, but the dirt.
@@ -81,6 +94,26 @@ NAME=dirt
                 ++uiOfId;
         }
         return uiOfId;
+    }
+
+    // An item of that ID on the first floor of the house, at that point of the design, deleted at the end of the test (from
+    //  the ground or the moving crate).
+    CItem* CreateAt(CTestObjects& objs, CItemMultiCustom* pHouse, ITEMID_TYPE id, int16 dx, int16 dy)
+    {
+        CItem* pItem = objs.Keep(CItem::CreateScript(id));
+        REQUIRE(pItem != nullptr);
+        const CPointMap& ptHouse = pHouse->GetTopPoint();
+        REQUIRE(pItem->MoveToUpdate(CPointMap(short(ptHouse.m_x + dx), short(ptHouse.m_y + dy), char(ptHouse.m_z + kiZ), ptHouse.m_map)));
+        return pItem;
+    }
+
+    // A verb of the house with a UID, as a script (UNLOCKITEM 040001234).
+    bool HouseVerb(CItemMultiCustom* pHouse, const char* pcKey, const CUID& uid)
+    {
+        char szArg[16];
+        snprintf(szArg, sizeof(szArg), "0%x", dword(uid));
+        CScript s(pcKey, szArg);
+        return static_cast<CObjBase*>(pHouse)->r_Verb(s, &g_Serv);     // Private in the house, as the scripts call it.
     }
 
     // As the loading of a saved design: the components are added as they are (COMP=), with no replacement.
@@ -223,6 +256,181 @@ TEST_SUITE("House design")
             CHECK(CountAt(pHouse, 3, 3, kidFloor) == 0);
             CHECK(CountAt(pHouse, 3, 3, kidWall) == 0);
             CHECK(CountAt(pHouse, 3, 3, ITEMID_DIRT_TILE) == 1);
+        }
+        CHECK(CObjBase::sm_iCount == uiObjs);
+    }
+}
+
+TEST_SUITE("House lockdowns and secured containers")
+{
+    TEST_CASE("A locked down item destroyed leaves the list of its house")
+    {
+        CTestEngine::Init();
+        CTestRunModeScope run;
+        const dword uiObjs = CObjBase::sm_iCount;
+        {
+            CTestObjects objs;
+            CItemMultiCustom* pHouse = CreateHouse(objs);
+            CItem* pItem = CItem::CreateScript(kidLockable);     // Not kept: destroyed by the test.
+            REQUIRE(pItem != nullptr);
+            REQUIRE(pItem->MoveToUpdate(pHouse->GetTopPoint()));
+            const CUID uidItem = pItem->GetUID();
+
+            // Before, its TAG named the item itself instead of the house: its destruction didn't unlock it, the house kept
+            //  its UID (counted in its storage, and taken for a lockdown by the object that reuses it).
+            pHouse->LockItem(uidItem);
+            REQUIRE(pHouse->GetLockedItemIndex(uidItem) == 0);
+            CHECK(pItem->GetLockDownOfMulti() == pHouse->GetUID());
+
+            pItem->Delete();
+            CWorldTestAccess::DestroyScheduledDeletions();
+            REQUIRE(uidItem.ItemFind() == nullptr);
+            CHECK(pHouse->GetLockedItemIndex(uidItem) < 0);
+            CHECK(pHouse->GetLockdownCount() == 0);
+        }
+        CHECK(CObjBase::sm_iCount == uiObjs);
+    }
+
+    TEST_CASE("UNLOCKITEM and RELEASE of an item that isn't in the list remove nothing from it")
+    {
+        CTestEngine::Init();
+        CTestRunModeScope run;
+        const dword uiObjs = CObjBase::sm_iCount;
+        {
+            CTestObjects objs;
+            CItemMultiCustom* pHouse = CreateHouse(objs);
+            CItem* pLocked = CreateAt(objs, pHouse, kidLockable, 1, 1);
+            CItem* pSecured = CreateAt(objs, pHouse, ITEMID_BACKPACK, 1, 2);
+            const CItem* pOtherItem = CreateAt(objs, pHouse, kidLockable, 1, 3);
+            const CItem* pOtherContainer = CreateAt(objs, pHouse, ITEMID_BACKPACK, 1, 4);
+            pHouse->LockItem(pLocked->GetUID());
+            pHouse->Secure(pSecured->GetUID());
+            REQUIRE(pHouse->GetLockdownCount() == 2);
+
+            // Before, the removal erased the end of the list: its last item (with an empty list, the size wrapped).
+            CHECK(HouseVerb(pHouse, "UNLOCKITEM", pOtherItem->GetUID()));
+            CHECK(HouseVerb(pHouse, "RELEASE", pOtherContainer->GetUID()));
+            CHECK(pHouse->GetLockedItemIndex(pLocked->GetUID()) == 0);
+            CHECK(pHouse->GetSecuredContainerIndex(pSecured->GetUID()) == 0);
+            CHECK(pHouse->GetLockdownCount() == 2);
+
+            // And the items of the list are released by them.
+            CHECK(HouseVerb(pHouse, "UNLOCKITEM", pLocked->GetUID()));
+            CHECK(HouseVerb(pHouse, "RELEASE", pSecured->GetUID()));
+            CHECK(pHouse->GetLockdownCount() == 0);
+            CHECK_FALSE(pLocked->IsAttr(ATTR_LOCKEDDOWN));
+            CHECK_FALSE(pSecured->IsAttr(ATTR_SECURE));
+        }
+        CHECK(CObjBase::sm_iCount == uiObjs);
+    }
+
+    TEST_CASE("RELEASE of an item that isn't a container leaves it as it is")
+    {
+        CTestEngine::Init();
+        CTestRunModeScope run;
+        const dword uiObjs = CObjBase::sm_iCount;
+        {
+            CTestObjects objs;
+            CItemMultiCustom* pHouse = CreateHouse(objs);
+            CItem* pItem = CreateAt(objs, pHouse, kidLockable, 1, 1);
+            pItem->m_uidLink = pHouse->GetUID();     // Linked to the house, as a door or a sign are.
+
+            // Before, it was released as a container: its link cleared, and the UID of the house written past the members
+            //  of a CItem (in its tail padding with GCC on Linux, the heap with MinGW).
+            CHECK(HouseVerb(pHouse, "RELEASE", pItem->GetUID()));
+            CHECK(pItem->m_uidLink == pHouse->GetUID());
+        }
+        CHECK(CObjBase::sm_iCount == uiObjs);
+    }
+
+    TEST_CASE("Moved to the moving crate (as at the start of a customization): released, the lists emptied")
+    {
+        CTestEngine::Init();
+        CTestRunModeScope run;
+        const dword uiObjs = CObjBase::sm_iCount;
+        {
+            CTestObjects objs;
+            CItemMultiCustom* pHouse = CreateHouse(objs);
+            const CObjBase* pCrate = pHouse->GetMovingCrate(false).ItemFind();
+            CItem* pLocked = CreateAt(objs, pHouse, kidLockable, 1, 1);
+            CItem* pSecured = CreateAt(objs, pHouse, ITEMID_BACKPACK, 1, 2);
+            pHouse->LockItem(pLocked->GetUID());
+            pHouse->Secure(pSecured->GetUID());
+
+            // In the order of @HouseDesignBegin (ARGN2=1). Before, the transfer of the secured containers emptied the list of
+            //  the lockdowns: they stayed locked, out of the list; and the secured list kept the containers moved.
+            pHouse->TransferSecuredToMovingCrate();
+            pHouse->TransferLockdownsToMovingCrate();
+            CHECK(pHouse->GetLockdownCount() == 0);
+            CHECK(pLocked->GetContainer() == pCrate);
+            CHECK(pSecured->GetContainer() == pCrate);
+            CHECK_FALSE(pLocked->IsAttr(ATTR_LOCKEDDOWN));
+            CHECK_FALSE(pSecured->IsAttr(ATTR_SECURE));
+            CHECK_FALSE(pLocked->GetLockDownOfMulti().IsValidUID());    // Its destruction won't look for the house.
+        }
+        CHECK(CObjBase::sm_iCount == uiObjs);
+    }
+
+    TEST_CASE("CLEARFLOOR: every locked down item and secured container of the floor goes to the moving crate, released")
+    {
+        CTestEngine::Init();
+        CTestRunModeScope run;
+        const dword uiObjs = CObjBase::sm_iCount;
+        {
+            CTestObjects objs;
+            CItemMultiCustom* pHouse = CreateHouse(objs);
+            std::vector<CItem*> vLocked, vSecured;
+            for (int16 i = 0; i < 3; ++i)
+            {
+                vLocked.push_back(CreateAt(objs, pHouse, kidLockable, i, 0));
+                pHouse->LockItem(vLocked.back()->GetUID());
+                vSecured.push_back(CreateAt(objs, pHouse, ITEMID_BACKPACK, i, 1));
+                pHouse->Secure(vSecured.back()->GetUID());
+            }
+            REQUIRE(pHouse->GetLockdownCount() == 6);
+
+            // Before, the lists were walked while each item was removed from them: one in two was skipped (moved to the crate
+            //  with the other items of the floor, but still locked or secured, and listed), and the walk read past the end.
+            CScript s("CLEARFLOOR", "0");
+            CHECK(static_cast<CObjBase*>(pHouse)->r_Verb(s, &g_Serv));
+            CHECK(pHouse->GetLockdownCount() == 0);
+            const CObjBase* pCrate = pHouse->GetMovingCrate(false).ItemFind();
+            for (const CItem* pItem : vLocked)
+            {
+                CHECK(pItem->GetContainer() == pCrate);
+                CHECK_FALSE(pItem->IsAttr(ATTR_LOCKEDDOWN));
+            }
+            for (const CItem* pItem : vSecured)
+            {
+                CHECK(pItem->GetContainer() == pCrate);
+                CHECK_FALSE(pItem->IsAttr(ATTR_SECURE));
+            }
+        }
+        CHECK(CObjBase::sm_iCount == uiObjs);
+    }
+
+    TEST_CASE("A component placed on a locked down item or a secured container: both go to the moving crate, released")
+    {
+        CTestEngine::Init();
+        CTestRunModeScope run;
+        const dword uiObjs = CObjBase::sm_iCount;
+        {
+            CTestObjects objs;
+            CItemMultiCustom* pHouse = CreateHouse(objs);
+            CItem* pLocked = CreateAt(objs, pHouse, kidLockable, 2, 2);
+            CItem* pSecured = CreateAt(objs, pHouse, ITEMID_BACKPACK, 2, 2);
+            pHouse->LockItem(pLocked->GetUID());
+            pHouse->Secure(pSecured->GetUID());
+
+            // Before, the secured containers were looked for in the list of the lockdowns found there (emptied): the container
+            //  stayed in the wall, secured.
+            pHouse->AddItem(nullptr, kidWall, 2, 2, kiZ);
+            const CObjBase* pCrate = pHouse->GetMovingCrate(false).ItemFind();
+            CHECK(pLocked->GetContainer() == pCrate);
+            CHECK(pSecured->GetContainer() == pCrate);
+            CHECK_FALSE(pLocked->IsAttr(ATTR_LOCKEDDOWN));
+            CHECK_FALSE(pSecured->IsAttr(ATTR_SECURE));
+            CHECK(pHouse->GetLockdownCount() == 0);
         }
         CHECK(CObjBase::sm_iCount == uiObjs);
     }

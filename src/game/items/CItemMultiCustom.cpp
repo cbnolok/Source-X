@@ -579,7 +579,7 @@ void CItemMultiCustom::AddItem(CClient * pClientSrc, ITEMID_TYPE id, int16 x, in
         GetSecuredAt(x, y, z, vListConts);
         if (!vListConts.empty())
         {
-            for (const CUID& uid : vListLocks)
+            for (const CUID& uid : vListConts)
             {
                 CItemContainer *pCont = static_cast<CItemContainer*>(uid.ItemFind());
                 if (pCont)
@@ -1374,50 +1374,39 @@ void CItemMultiCustom::ClearFloor(int8 iFloor)
     int16 iMinZ = iBaseZ;
     CItemContainer *pCrate = static_cast<CItemContainer*>(GetMovingCrate(true).ItemFind());
     int i = 0;
-    // Removing Secured Containers.
-    int max = (int)_lSecureContainers.size();
-    if (max > 0)
+    // Removing Secured Containers. The lists are walked on a copy: Release and UnlockItem remove the items from them (the
+    //  walk skipped the one after each removed, and read past the end).
+    const std::vector<CUID> vSecured(_lSecureContainers);
+    for (const CUID& uid : vSecured)
     {
-        for (i = 0; i < max; ++i)
+        CItemContainer *pCont = static_cast<CItemContainer*>(uid.ItemFind());
+        if (pCont && (pCont->GetTopPoint().m_z >= iMinZ) && (pCont->GetTopPoint().m_z <= iMaxZ))
         {
-            CUID uid(_lSecureContainers[i]);
-            CItemContainer *pCont = static_cast<CItemContainer*>(uid.ItemFind());
-            if (pCont && (pCont->GetTopPoint().m_z >= iMinZ) && (pCont->GetTopPoint().m_z <= iMaxZ))
-            {
-                Release(uid, true);
-                pCont->RemoveFromView();
-                pCrate->ContentAdd(pCont);
-            }
+            Release(uid, true);
+            pCont->RemoveFromView();
+            pCrate->ContentAdd(pCont);
         }
     }
     // Removing Lockdowns
-    max = (int)_lLockDowns.size();
-    if (max > 0)
+    const std::vector<CUID> vLockDowns(_lLockDowns);
+    for (const CUID& uid : vLockDowns)
     {
-        for (i = 0; i < max; ++i)
+        CItem *pItem = uid.ItemFind();
+        if (pItem && (pItem->GetTopPoint().m_z >= iMinZ) && (pItem->GetTopPoint().m_z <= iMaxZ))
         {
-            CUID uid = _lLockDowns[i];
-            CItem *pItem = uid.ItemFind();
-            if (pItem && (pItem->GetTopPoint().m_z >= iMinZ) && (pItem->GetTopPoint().m_z <= iMaxZ))
-            {
-                UnlockItem(uid, true);
-                pItem->RemoveFromView();
-                pCrate->ContentAdd(pItem);
-            }
+            UnlockItem(uid, true);
+            pItem->RemoveFromView();
+            pCrate->ContentAdd(pItem);
         }
     }
-    // Redeeding Addons.
-    max = (int)_lAddons.size();
-    if (max > 0)
+    // Redeeding Addons (it read the lockdown list, up to the count of the addons).
+    const std::vector<CUID> vAddons(_lAddons);
+    for (const CUID& uid : vAddons)
     {
-        for (i = 0; i < max; ++i)
+        CItemMulti *pAddon = static_cast<CItemMulti*>(uid.ItemFind());
+        if (pAddon && (pAddon->GetTopPoint().m_z >= iMinZ) && (pAddon->GetTopPoint().m_z <= iMaxZ))
         {
-            CUID uid = _lLockDowns[i];
-            CItemMulti *pAddon = static_cast<CItemMulti*>(uid.ItemFind());
-            if (pAddon && (pAddon->GetTopPoint().m_z >= iMinZ) && (pAddon->GetTopPoint().m_z <= iMaxZ))
-            {
-                pAddon->Redeed(false, false);
-            }
+            pAddon->Redeed(false, false);
         }
     }
 
