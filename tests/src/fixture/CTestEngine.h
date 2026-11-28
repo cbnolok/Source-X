@@ -13,8 +13,9 @@
 //    the flags and layer of the client files for the containers of the chars and the gold, a floor for kidFloorTile
 //    and the dirt tile of the house designs, none for the others);
 //  - the sectors of the world;
-//  - a base script (the skill class of the players, the ITEMDEFs of the containers of the chars and of the gold), and the
-//    scripts the tests load (LoadScript): no item can be created without its ITEMDEF;
+//  - a base script (the names of the item types the tests use, with the values of the server; the skill class of the
+//    players, the ITEMDEFs of the containers of the chars and of the gold), and the scripts the tests load (LoadScript): no
+//    item can be created without its ITEMDEF;
 //  - no region: a char isn't in any (CChar::GetRegion is null);
 //  - the names of the triggers;
 //  - CLIENTLINGERTIME=0, so the chars of the fake clients log out at once.

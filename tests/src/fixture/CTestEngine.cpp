@@ -11,6 +11,7 @@
 #include "../../../src/game/uo_files/uofiles_enums_itemid.h"
 #include "../../../src/game/uo_files/uofiles_macros.h"
 #include "../../../src/game/chars/CCharBase.h"
+#include "../../../src/game/items/item_types.h"
 #include "../../../src/game/CServerConfig.h"
 #include "../../../src/game/CWorld.h"
 #include "../../../src/game/triggers.h"
@@ -65,8 +66,26 @@ namespace
         {ITEMID_DIRT_TILE, UFLAG1_FLOOR, LAYER_NONE, 1, 0},
     };
 
-    // The definitions the server needs for any char: the skill class of the players, the containers and the gold, with
-    //  the type names they use.
+    // The names of the item types the scripts of the tests use (the TYPEDEFS of sphere_defs.scp), with the values of the
+    //  server: they come before the base script.
+    struct TypeDef
+    {
+        std::string_view svName;
+        IT_TYPE type;
+    };
+    constexpr TypeDef kTypeDefs[] = {
+        {"t_normal", IT_NORMAL},
+        {"t_container", IT_CONTAINER},
+        {"t_book", IT_BOOK},
+        {"t_gold", IT_GOLD},
+        {"t_map", IT_MAP},
+        {"t_eq_vendor_box", IT_EQ_VENDOR_BOX},
+        {"t_eq_bank_box", IT_EQ_BANK_BOX},
+        {"t_jewelry", IT_JEWELRY},
+        {"t_multi_custom", IT_MULTI_CUSTOM},
+    };
+
+    // The definitions the server needs for any char: the skill class of the players, the containers and the gold.
     constexpr std::string_view kBaseScript = R"(
 [SKILLCLASS 0]
 DEFNAME=Class_Undeclared
@@ -76,13 +95,6 @@ SKILLSUM=10000.0
 STR=100
 INT=100
 DEX=100
-
-[TYPEDEFS]
-t_normal 0
-t_container 1
-t_gold 72
-t_eq_vendor_box 113
-t_eq_bank_box 114
 
 [ITEMDEF 0e75]
 DEFNAME=i_backpack
@@ -240,7 +252,11 @@ void CTestEngine::Init()
 
     g_Cfg.m_iClientLingerTime = 0;
 
-    if (!LoadScript("fixture_base", kBaseScript))
+    std::string sBaseScript("[TYPEDEFS]\n");
+    for (const TypeDef& def : kTypeDefs)
+        sBaseScript.append(def.svName).append(" ").append(std::to_string(int(def.type))).append("\n");
+    sBaseScript.append(kBaseScript);
+    if (!LoadScript("fixture_base", sBaseScript))
         throw std::runtime_error("CTestEngine: the base script wasn't loaded");
 
     std::atexit(Shutdown);
