@@ -264,7 +264,8 @@ VERFILE_TYPE CUOInstall::OpenFiles( ullong ullMask )
 				//	check for map files of custom maps
 				for (int m = 0; m < MAP_SUPPORTED_QTY; ++m)
 				{
-					if (g_MapList.IsInitialized(m) || (m == 0)) //Need at least a minimum of map0... (Ben)
+					// A map disabled in the ini (MAPx= with no value) is initialized, but not supported: it has no files.
+					if ((g_MapList.IsMapSupported(m) && g_MapList.IsInitialized(m)) || (m == 0)) //Need at least a minimum of map0... (Ben)
 					{
                         const int index = g_MapList.m_mapGeoData.maps[m].iNum;
 						if (index == -1)

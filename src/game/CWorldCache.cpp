@@ -23,7 +23,8 @@ void CWorldCache::Init()
 {
 	for (int i = 0; i < MAP_SUPPORTED_QTY; ++i)
 	{
-		if (!g_MapList.IsInitialized(i))
+		// A map disabled in the ini (MAPx= with no value) is initialized, but not supported: it has no size.
+		if (!g_MapList.IsMapSupported(i) || !g_MapList.IsInitialized(i))
 			continue;
 
 		const int iBlocks = _GetMapBlocksCount(i);

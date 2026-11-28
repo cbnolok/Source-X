@@ -261,7 +261,8 @@ const CServerMapBlock* CWorldMap::GetMapBlock(const CPointMap& pt) // static
 
     EXC_TRY("GetMapBlock");
 
-	if (!pt.IsValidXY() || !g_MapList.IsInitialized(pt.m_map))
+	// A map that isn't supported has no cache: disabled in the ini (MAPx= with no value), or later (files not found).
+	if (!pt.IsValidXY() || !g_MapList.IsMapSupported(pt.m_map) || !g_MapList.IsInitialized(pt.m_map))
 	{
 		g_Log.EventWarn("Attempting to access invalid map block at %s.\n", pt.WriteUsed());
 		return nullptr;
