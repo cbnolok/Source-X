@@ -885,7 +885,7 @@ bool PacketMapEdit::onReceive(CNetState* net)
 	{
 		case MAP_ADD: // add pin
 		{
-			if (map->m_Pins.size() > CItemMap::MAX_PINS)
+			if (map->m_Pins.size() >= CItemMap::MAX_PINS)
 				return true;
 
 			CMapPinRec mapPin(x, y);
@@ -894,8 +894,14 @@ bool PacketMapEdit::onReceive(CNetState* net)
 
 		case MAP_INSERT: // insert between 2 pins
 		{
-			if (map->m_Pins.size() > CItemMap::MAX_PINS)
+			if (map->m_Pins.size() >= CItemMap::MAX_PINS)
 				return true;
+			// The new pin goes before the one at that index, or after the last one (pin == size).
+			if (pin > map->m_Pins.size())
+			{
+				client->SysMessage("That's strange... (bad pin)");
+				return true;
+			}
 
 			CMapPinRec mapPin(x, y);
 			map->m_Pins.insert(pin, mapPin);
@@ -1037,19 +1043,24 @@ bool PacketBookPageEdit::onReceive(CNetState* net)
 
 		-- page;
 		len = 0;
+		bool fCut = false;
 
-		// read each line of the page
+		// read each line of the page, separated by a tab (in the place of its terminator)
 		while (lineCount > 0)
 		{
-			len += readStringNullASCII(content + len, SCRIPT_MAX_LINE_LEN-1 - len);
-			if (len >= SCRIPT_MAX_LINE_LEN)
-			{
-				len = SCRIPT_MAX_LINE_LEN - 1;
-				break;
-			}
-
+			const uint uiMaxLineLen = SCRIPT_MAX_LINE_LEN-1 - len;	// At least 1, see below.
+			const uint uiLineLen = readStringNullASCII(content + len, uiMaxLineLen);
+			len += uiLineLen;
 			content[len++] = '\t';
 			--lineCount;
+
+			// The page is cut here if the end of this line wasn't read (the buffer is full), or if there's no room
+			//  for the next one: its max length would be 0, or wrap below 0.
+			if ((uiLineLen == uiMaxLineLen) || ((lineCount > 0) && (len >= SCRIPT_MAX_LINE_LEN-1)))
+			{
+				fCut = true;
+				break;
+			}
 		}
 
 		ASSERT(len > 0);
@@ -1059,6 +1070,10 @@ bool PacketBookPageEdit::onReceive(CNetState* net)
 
 		// set page content
 		text->SetPageText(page, content);
+
+		// The rest of this page wasn't read: what follows can't be parsed as the next page.
+		if (fCut)
+			break;
 	}
 	return true;
 }

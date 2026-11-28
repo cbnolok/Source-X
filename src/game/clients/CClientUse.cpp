@@ -1119,9 +1119,12 @@ bool CClient::Cmd_Skill_Tracking( uint track_sel, bool fExec )
 		return true;
 	}
 
+	// The entry the client selected (0x7D): one of the menu, or the menu was cancelled (0).
+	if ( track_sel >= ARRAY_COUNT(m_tmMenu.m_Item) )
+		return false;
+
 	if ( track_sel > 0 ) // Not Cancelled
 	{
-		ASSERT(track_sel < ARRAY_COUNT(m_tmMenu.m_Item));
 		if ( fExec )
 		{
 			// Tracking menu got us here. Start tracking the selected creature.

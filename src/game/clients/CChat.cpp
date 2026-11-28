@@ -168,18 +168,24 @@ void CChat::Action(CClient* pClient, const nachar* pszText, int len, CLanguageID
 	}
 	case CHATACT_JoinChannel:				// client shortcut: /conf
 	{
-		// Look for second double quote to separate channel from password
-		size_t i = 1;
-		for (; szMsg[i] != '\0'; ++i)
+		// "channel" password: look for second double quote to separate channel from password.
+		// The text can be empty or have no second quote: then nothing is read past its end (before, the channel name or
+		//  the password were read there, from the stack, and the name was sent back to the client).
+		tchar* pszChannel = (szMsg[0] != '\0') ? (szMsg + 1) : szMsg;
+		size_t i = 0;
+		for (; pszChannel[i] != '\0'; ++i)
 		{
-			if (szMsg[i] == '"')
+			if (pszChannel[i] == '"')
 				break;
 		}
-		szMsg[i] = '\0';
-		tchar* pszPassword = szMsg + i + 1;
-		if (pszPassword[0] == ' ')	// skip whitespaces
-			pszPassword += 1;
-		JoinChannel(szMsg + 1, pszPassword, pMe);
+		tchar* pszPassword = pszChannel + i;
+		if (pszPassword[0] != '\0')
+		{
+			*pszPassword++ = '\0';
+			if (pszPassword[0] == ' ')	// skip whitespaces
+				pszPassword += 1;
+		}
+		JoinChannel(pszChannel, pszPassword, pMe);
 		break;
 	}
 	case CHATACT_CreateChannel:				// client shortcut: /newconf
@@ -234,7 +240,8 @@ void CChat::Action(CClient* pClient, const nachar* pszText, int len, CLanguageID
 				break;
 			}
 		}
-		pChannel->PrivateMessage(pMe, buffer, buffer + i + 1, lang);
+		// With no space there's no message: an empty one (before, it was read past the end of the text).
+		pChannel->PrivateMessage(pMe, buffer, (i < bufferLength) ? (buffer + i + 1) : (buffer + i), lang);
 		break;
 	}
 	case CHATACT_AddIgnore:					// client shortcut: +ignore

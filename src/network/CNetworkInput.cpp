@@ -488,7 +488,13 @@ bool CNetworkInput::processOtherClientData(CNetState* state, Packet* buffer)
 
         // first real data from client which we can use to log in
         EXC_SET_BLOCK("encryption setup");
-        ASSERT(buffer->getRemainingLength() <= sizeof(CEvent));
+        if (buffer->getRemainingLength() > sizeof(CEvent))
+        {
+            // Longer than any login message: refused (before, copied past the end of the event in the Release builds).
+            g_Log.EventWarn("%x:Client sent %u bytes before the login, more than the max of %" PRIuSIZE_T ", disconnecting.\n",
+                state->id(), buffer->getRemainingLength(), sizeof(CEvent));
+            return false;
+        }
 
         std::unique_ptr<CEvent> evt = std::make_unique<CEvent>();
         memcpy(evt.get(), buffer->getRemainingData(), buffer->getRemainingLength());
