@@ -89,6 +89,11 @@ void CClient::Event_ChatButton(const nachar* pszName) // Client's chat button wa
 void CClient::Event_ChatText( const nachar* pszText, int len, CLanguageID lang ) // Text from a client
 {
 	ADDTOCALLSTACK("CClient::Event_ChatText");
+	// As the chat button (Event_ChatButton): only with a char in the world. A client at the char selection could join a
+	//  channel, and its member was left there at its disconnect (~CClient quits the chat only for a char).
+	if ( m_pChar == nullptr )
+		return;
+
 	// Just send it all to the chat system
 	g_Serv.m_Chats.Action( this, pszText, len, lang );
 }

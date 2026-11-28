@@ -121,8 +121,9 @@ CClient::~CClient() noexcept
 		m_pAccount = nullptr;
 	}
 
-	if (fWasChar)
-		g_Serv.m_Chats.QuitChat(this);
+	// Even with no char: a member left in a channel would be used by the channel after its client is destroyed (QuitChat
+	//  does nothing for a client in no channel).
+	g_Serv.m_Chats.QuitChat(this);
 
 	if (m_pPopupPacket != nullptr)
 	{
