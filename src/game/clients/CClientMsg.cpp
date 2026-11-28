@@ -2682,6 +2682,11 @@ void CClient::addItemMenu( CLIMODE_TYPE mode, const CMenuItem * item, uint count
 	if (pObj == nullptr)
 		pObj = m_pChar;
 
+	// The entries past the count are cleared: the client can select any, and found there the UIDs (tracking, edit) or
+	//  the indexes (skill and script menus) of an earlier menu.
+	for (uint i = count + 1; i < ARRAY_COUNT(m_tmMenu.m_Item); ++i)
+		m_tmMenu.m_Item[i] = 0;
+
 	new PacketDisplayMenu(this, mode, item, count, pObj);
 
 	m_tmMenu.m_UID = pObj->GetUID();

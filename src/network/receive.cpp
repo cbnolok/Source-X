@@ -1406,9 +1406,17 @@ bool PacketMenuChoice::onReceive(CNetState* net)
 	switch (context)
 	{
 		case CLIMODE_MENU:
-			// a generic menu from script
-			client->Menu_OnSelect(client->m_tmMenu.m_ResourceID, select, serial.ObjFind());
+		{
+			// a generic menu from script: the line selected names the ON= shown there (Menu_Setup), none past the
+			//  entries sent.
+			if (select >= ARRAY_COUNT(client->m_tmMenu.m_Item))
+				return true;
+			const int iOnIndex = (select > 0) ? int(client->m_tmMenu.m_Item[select]) : 0;
+			if ((select > 0) && (iOnIndex == 0))
+				return true;
+			client->Menu_OnSelect(client->m_tmMenu.m_ResourceID, iOnIndex, serial.ObjFind());
 			return true;
+		}
 
 		case CLIMODE_MENU_SKILL:
 			// some skill menu got us here

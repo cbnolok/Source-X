@@ -387,15 +387,27 @@ void CClient::Menu_Setup( CResourceID rid, CObjBase * pObj )
 	item[0].m_sText = s.GetKey();
 	// item[0].m_id = rid.m_internalrid;	// general context id
 
+	// Each entry shown keeps the index of its ON= among those Menu_OnSelect counts (not the triggers, ON=@, quoted or
+	//  not as GetArgStr reads them): the select of a line runs the entry shown there, also when an entry before it isn't
+	//  shown (a bad item ID).
 	uint i = 0;
+	dword dwOnIndex = 0;
 	while (s.ReadKeyParse())
 	{
 		if ( ! s.IsKey( "ON" ))
 			continue;
 
+		const tchar * ptcArg = s.GetArgRaw();
+		if ( (ptcArg[0] != '@') && !((ptcArg[0] == '"') && (ptcArg[1] == '@')) )
+			++dwOnIndex;
+
 		++i;
 		if ( ! item[i].ParseLine( s.GetArgRaw(), pObj, m_pChar ))
+		{
 			--i;
+			continue;
+		}
+		m_tmMenu.m_Item[i] = dwOnIndex;
 
 		if ( i >= (ARRAY_COUNT( item ) - 1))
 			break;
