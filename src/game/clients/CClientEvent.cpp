@@ -611,11 +611,13 @@ void CClient::Event_Item_Drop( CUID uidItem, CPointMap pt, CUID uidOn, uchar gri
 }
 
 
-void CClient::Event_Skill_Use( SKILL_TYPE skill ) // Skill is clicked on the skill list
+void CClient::Event_Skill_Use( SKILL_TYPE skill, bool fTargetCursor ) // Skill is clicked on the skill list
 {
 	ADDTOCALLSTACK("CClient::Event_Skill_Use");
 	// All the push button skills come through here.
 	// Any "Last skill" macro comes here as well. (push button only)
+	// fTargetCursor = false: a targeted skill gets the target mode, no cursor: the client sent the target with the skill
+	//  (0xBF.0x2E), and the caller gives it to Event_Target.
 	if ( m_pChar == nullptr )
 		return;
 
@@ -655,13 +657,21 @@ void CClient::Event_Skill_Use( SKILL_TYPE skill ) // Skill is clicked on the ski
 	bool fCheckCrime	= false;
 	bool fDoTargeting	= false;
 
+	auto SkillTarget = [this, skill, fTargetCursor, &fCheckCrime](const CSkillDef* pSkillDef)
+	{
+		m_tmSkillTarg.m_iSkill = skill;	// targetting what skill ?
+		if ( fTargetCursor )
+			addTarget( CLIMODE_TARG_SKILL, pSkillDef->m_sTargetPrompt.GetBuffer(), false, fCheckCrime, 0, atoi(pSkillDef->m_sTargetPromptCliloc.GetBuffer()));
+		else
+			SetTargMode( CLIMODE_TARG_SKILL );
+	};
+
 	if ( g_Cfg.IsSkillFlag( skill, SKF_SCRIPTED ) )
 	{
 		const CSkillDef * pSkillDef = g_Cfg.GetSkillDef(skill);
 		if (pSkillDef != nullptr && (pSkillDef->m_sTargetPrompt.IsEmpty() == false || pSkillDef->m_sTargetPromptCliloc.IsEmpty() == false))
 		{
-			m_tmSkillTarg.m_iSkill = skill;	// targetting what skill ?
-			addTarget( CLIMODE_TARG_SKILL, pSkillDef->m_sTargetPrompt.GetBuffer(), false, fCheckCrime, 0, atoi(pSkillDef->m_sTargetPromptCliloc.GetBuffer()));
+			SkillTarget(pSkillDef);
 			return;
 		}
 		else
@@ -736,8 +746,7 @@ void CClient::Event_Skill_Use( SKILL_TYPE skill ) // Skill is clicked on the ski
 			return;
 		}
 
-		m_tmSkillTarg.m_iSkill = skill;	// targetting what skill ?
-		addTarget( CLIMODE_TARG_SKILL, pSkillDef->m_sTargetPrompt.GetBuffer(), false, fCheckCrime, 0 , atoi(pSkillDef->m_sTargetPromptCliloc.GetBuffer()));
+		SkillTarget(pSkillDef);
 		return;
 	}
 }

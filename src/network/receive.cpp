@@ -664,7 +664,12 @@ bool PacketObjStatusReq::onReceive(CNetState* net)
 	CUID targetSerial(readInt32());
 
 	if ( requestType == 4 )
-		client->addStatusWindow(targetSerial.ObjFind(), true);
+	{
+		// As the other info requests (names, tooltips, popups): only for an object in sight.
+		CObjBase* pObj = targetSerial.ObjFind();
+		if ((pObj != nullptr) && client->GetChar()->CanSee(pObj))
+			client->addStatusWindow(pObj, true);
+	}
 	else if ( requestType == 5 )
 		client->addSkillWindow(SKILL_QTY);
 	return true;
@@ -1017,6 +1022,13 @@ bool PacketBookPageEdit::onReceive(CNetState* net)
 	CItemMessage* text = dynamic_cast<CItemMessage*>( book );
 	if (text == nullptr || book->IsBookWritable() == false)
 		return true;
+
+	// As for the title (CClient::Event_Book_Title): a book in sight is read, a book in reach is written.
+	if (!character->CanTouch(book))
+	{
+		client->SysMessage(g_Cfg.GetDefaultMsg(DEFMSG_REACH_FAIL));
+		return true;
+	}
 
 	skip(-4);
 
@@ -3168,6 +3180,11 @@ bool PacketHouseDesignReq::onReceive(CNetState* net)
 	if (multi == nullptr)
 		return true;
 
+	// The client asks for the design of the houses it sees (CItemMultiCustom::SendVersionTo): only those.
+	const CChar* character = client->GetChar();
+	if ((character == nullptr) || !character->CanSee(multi))
+		return true;
+
 	multi->SendStructureTo(client);
 	return true;
 }
@@ -3302,17 +3319,22 @@ bool PacketTargetedSkill::onReceive(CNetState* net)
     }
 
     const CUID uidTarget(dwTargetUID);
-    CObjBase * pTarget = uidTarget.ObjFind();
+    const CObjBase * pTarget = uidTarget.ObjFind();
     if (pTarget)
     {
         CClient* pClient = net->getClient();
         ASSERT(pClient);
-        CChar* pChar = pClient->GetChar();
-        if (pChar == nullptr)
+        if (pClient->GetChar() == nullptr)
             return true;
 
-        pChar->m_Act_UID = uidTarget;
-        pChar->Skill_Start((SKILL_TYPE)wSkillID);
+        // As the skill button, then the target, with their checks (Event_Skill_Use: the skill can be used, its triggers;
+        //  Event_Target: the target must be visible) and the target handling of the skill (OnTarg_Skill). The client chose
+        //  the target with the skill: no target cursor. A skill that takes no target starts as from the button.
+        //  The triggers of the skill may remove the target: Event_Target finds it again, and takes its point.
+        const SKILL_TYPE skill = (SKILL_TYPE)wSkillID;
+        pClient->Event_Skill_Use(skill, false);
+        if ((pClient->GetTargMode() == CLIMODE_TARG_SKILL) && (pClient->m_tmSkillTarg.m_iSkill == skill))
+            pClient->Event_Target(CLIMODE_TARG_SKILL, uidTarget, CPointMap());
     }
     else
     {

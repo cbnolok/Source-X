@@ -317,7 +317,6 @@ private:
 	bool OnTarg_Pet_Stable( CChar * pCharPet );
 
 	// Commands from client
-	void Event_Skill_Use( SKILL_TYPE x ); // Skill is clicked on the skill list
 	void Event_Talk_Common(lpctstr pszText ); // PC speech
 	bool Event_Command( lpctstr pszCommand, TALKMODE_TYPE mode = TALKMODE_SAY ); // Client entered a '/' command like /ADD
 
@@ -344,6 +343,7 @@ public:
 	void Event_PromptResp_GMPage( lpctstr pszReason );
 	bool Event_SetName( CUID uid, const char * pszCharName );
 	void Event_SingleClick( CUID uid );
+	void Event_Skill_Use( SKILL_TYPE x, bool fTargetCursor = true ); // Skill is clicked on the skill list. No target cursor: the target mode only (the client sent the target with the skill: 0xBF.0x2E).
 	void Event_Talk( lpctstr pszText, HUE_TYPE wHue, TALKMODE_TYPE mode, bool fNoStrip = false ); // PC speech
 	void Event_TalkUNICODE(nachar* wszText, int iTextLen, HUE_TYPE wHue, TALKMODE_TYPE mode, FONT_TYPE font, lpctstr pszLang );
 	void Event_Target( dword context, CUID uid, CPointMap pt, byte flags = 0, ITEMID_TYPE id = ITEMID_NOTHING );
