@@ -96,8 +96,11 @@ protected:
     int64 _iInByteCounter;    // number of bytes received by this client since the last legitimacy check
     int64 _iOutByteCounter;   // number of bytes sent     by this client since the last legitimacy check
 
+    void initClient(void);  // the client of a new connection, the state opened (init, once the socket is set up)
+    bool acceptsPacket(PacketSend* packet) const;   // canReceive, the socket aside: in use, not closing (but for the disconnect packets), with a client
+
 #ifdef UNIT_TESTING
-    friend struct CNetTestAccess;
+    friend struct CNetTestAccess;   // The fake clients of the unit tests: their state has no socket.
     CNetStateTestSink* _pUnitTestSink = nullptr;
 #endif
 

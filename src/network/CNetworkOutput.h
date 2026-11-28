@@ -8,6 +8,7 @@
 
 #include "../common/common.h"
 
+class CClient;
 class CNetState;
 class CNetworkThread;
 class PacketSend;
@@ -51,8 +52,13 @@ private:
 	bool processByteQueue(CNetState* state);								// process a client's byte queue
 
 	bool sendPacket(CNetState* state, PacketSend* packet);				// send packet to client (can be queued for async operation)
+	static bool checkPacketSend(CClient* client, PacketSend* packet);	// does the packet go to the client? (its onSend, the packet filters of the scripts)
 	bool sendPacketData(CNetState* state, PacketSend* packet);			// send packet data to client
 	size_t sendData(CNetState* state, const byte* data, size_t length);	// send raw data to client
+
+#ifdef UNIT_TESTING
+	friend struct CNetTestAccess;	// The fake clients of the unit tests: they run the checks on the packets sent to them.
+#endif
 };
 
 

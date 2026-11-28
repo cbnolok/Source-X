@@ -213,18 +213,7 @@ void CNetworkInput::processData()
             Packet* buffer = state->m_incoming.rawBuffer;
             if (buffer != nullptr)
             {
-                // we have a buffer of raw bytes, we need to go through them all and process as much as we can
-                while (state->isReadClosed() == false && buffer->getRemainingLength() > 0)
-                {
-                    if (processData(state, buffer))
-                        continue;
-
-                    // processData didn't want to use any data, which means we probably
-                    // received some invalid data or that the packet was malformed
-                    // best course of action right now is to close the connection
-                    state->markReadClosed();
-                    break;
-                }
+                processRawData(state, buffer);
 
                 if (buffer->getRemainingLength() <= 0)
                 {
@@ -276,6 +265,24 @@ bool CNetworkInput::checkForData(fd_set& fds)
     return false;
 }
 
+bool CNetworkInput::processRawData(CNetState* state, Packet* buffer)
+{
+    ADDTOCALLSTACK("CNetworkInput::processRawData");
+    // we have a buffer of raw bytes, we need to go through them all and process as much as we can
+    while (state->isReadClosed() == false && buffer->getRemainingLength() > 0)
+    {
+        if (processData(state, buffer))
+            continue;
+
+        // processData didn't want to use any data, which means we probably
+        // received some invalid data or that the packet was malformed
+        // best course of action right now is to close the connection
+        state->markReadClosed();
+        return false;
+    }
+    return true;
+}
+
 bool CNetworkInput::processData(CNetState* state, Packet* buffer)
 {
     ADDTOCALLSTACK("CNetworkInput::processData");
@@ -295,50 +302,19 @@ bool CNetworkInput::processData(CNetState* state, Packet* buffer)
     return processGameClientData(state, buffer);
 }
 
-bool CNetworkInput::processGameClientData(CNetState* state, Packet* buffer)
+uint CNetworkInput::processGamePackets(CNetState* state, Packet* packet, const PacketManager& packets) // static
 {
-    ADDTOCALLSTACK("CNetworkInput::processGameClientData");
-    EXC_TRY("ProcessGameData");
-    ASSERT(state != nullptr);
-    ASSERT(buffer != nullptr);
+    ADDTOCALLSTACK("CNetworkInput::processGamePackets");
     CClient* client = state->getClient();
-    ASSERT(client != nullptr);
-
-    EXC_SET_BLOCK("decrypt message");
-    if (!client->m_Crypt.Decrypt(m_decryptBuffer, buffer->getRemainingData(), MAX_BUFFER, buffer->getRemainingLength()))
-    {
-        g_Log.EventError("NET-IN: processGameClientData failed (Decrypt).\n");
-        return false;
-    }
-
-    if (state->m_incoming.buffer == nullptr)
-    {
-        // create new buffer
-        state->m_incoming.buffer = new Packet(m_decryptBuffer, buffer->getRemainingLength());
-    }
-    else
-    {
-        // append to buffer
-        uint pos = state->m_incoming.buffer->getPosition();
-        state->m_incoming.buffer->seek(state->m_incoming.buffer->getLength());
-        state->m_incoming.buffer->writeData(m_decryptBuffer, buffer->getRemainingLength());
-        state->m_incoming.buffer->seek(pos);
-    }
-
-    Packet* packet = state->m_incoming.buffer;
     uint remainingLength = packet->getRemainingLength();
 
-    EXC_SET_BLOCK("record message");
-    xRecordPacket(client, packet, "client->server");
-
-    // process the message
     EXC_TRYSUB("ProcessMessage");
 
     while (remainingLength > 0 && state->isClosing() == false)
     {
         ASSERT(remainingLength == packet->getRemainingLength());
         byte packetId = packet->getRemainingData()[0];
-        Packet* handler = m_thread->m_manager->getPacketManager().getHandler(packetId);
+        Packet* handler = packets.getHandler(packetId);
 
         if (g_Cfg.m_iDebugFlags & DEBUGF_PACKETS)
         {
@@ -430,6 +406,47 @@ bool CNetworkInput::processGameClientData(CNetState* state, Packet* buffer)
     }
 
     EXC_DEBUGSUB_END;
+
+    return remainingLength;
+}
+
+bool CNetworkInput::processGameClientData(CNetState* state, Packet* buffer)
+{
+    ADDTOCALLSTACK("CNetworkInput::processGameClientData");
+    EXC_TRY("ProcessGameData");
+    ASSERT(state != nullptr);
+    ASSERT(buffer != nullptr);
+    CClient* client = state->getClient();
+    ASSERT(client != nullptr);
+
+    EXC_SET_BLOCK("decrypt message");
+    if (!client->m_Crypt.Decrypt(m_decryptBuffer, buffer->getRemainingData(), MAX_BUFFER, buffer->getRemainingLength()))
+    {
+        g_Log.EventError("NET-IN: processGameClientData failed (Decrypt).\n");
+        return false;
+    }
+
+    if (state->m_incoming.buffer == nullptr)
+    {
+        // create new buffer
+        state->m_incoming.buffer = new Packet(m_decryptBuffer, buffer->getRemainingLength());
+    }
+    else
+    {
+        // append to buffer
+        uint pos = state->m_incoming.buffer->getPosition();
+        state->m_incoming.buffer->seek(state->m_incoming.buffer->getLength());
+        state->m_incoming.buffer->writeData(m_decryptBuffer, buffer->getRemainingLength());
+        state->m_incoming.buffer->seek(pos);
+    }
+
+    Packet* packet = state->m_incoming.buffer;
+
+    EXC_SET_BLOCK("record message");
+    xRecordPacket(client, packet, "client->server");
+
+    // process the message
+    const uint remainingLength = processGamePackets(state, packet, m_thread->m_manager->getPacketManager());
 
     // delete the buffer once it has been exhausted
     if (remainingLength <= 0)

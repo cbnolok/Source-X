@@ -209,6 +209,15 @@ void CNetState::init(SOCKET socket, CSocketAddress addr)
     iSockRet = m_socket.SetSockOpt(TCP_NODELAY, &iSockFlag, sizeof(iSockFlag), IPPROTO_TCP);
     CheckReportNetAPIErr(iSockRet, "NetState::init.TCP_NODELAY");
 
+    initClient();
+}
+
+void CNetState::initClient(void)
+{
+    ADDTOCALLSTACK("CNetState::initClient");
+    // The client of the new connection, and the state opened: after the socket is set up (init). The fake clients of the
+    //  unit tests have no socket.
+
     m_iConnectionTimeMs = CSTime::GetMonotonicSysTimeMilli();
 
     g_Serv.StatInc(SERV_STAT_CLIENTS);
@@ -216,7 +225,7 @@ void CNetState::init(SOCKET socket, CSocketAddress addr)
     m_client = client;
 
 #ifdef _LIBEV
-    if (g_Cfg.m_fUseAsyncNetwork != 0)
+    if (m_socket.IsOpen() && g_Cfg.m_fUseAsyncNetwork != 0)
     {
         DEBUGNETWORK(("%x:Registering async client\n", id()));
         g_NetworkEvent.registerClient(this, LinuxEv::Write);
@@ -347,7 +356,12 @@ bool CNetState::hasPendingData(void) const
 
 bool CNetState::canReceive(PacketSend* packet) const
 {
-    if (isInUse() == false || m_socket.IsOpen() == false || packet == nullptr)
+    return m_socket.IsOpen() && acceptsPacket(packet);
+}
+
+bool CNetState::acceptsPacket(PacketSend* packet) const
+{
+    if (isInUse() == false || packet == nullptr)
         return false;
 
     if (isClosing() && packet->getPriority() < NETWORK_DISCONNECTPRI)

@@ -1,58 +1,70 @@
 #include "CFakeClient.h"
 #include "CTestEngine.h"
 #include "../CWorldTestAccess.h"
+#include "../../../src/common/sphere_library/CSString.h"
 #include "../../../src/game/chars/CChar.h"
 #include "../../../src/game/clients/CAccount.h"
 #include "../../../src/game/clients/CClient.h"
 #include "../../../src/game/CServer.h"
 #include "../../../src/network/CNetworkInput.h"
 #include "../../../src/network/CNetworkManager.h"
+#include "../../../src/network/CNetworkOutput.h"
 #include "../../../src/network/CPacketManager.h"
+#include "../../../src/network/send.h"
 #include <stdexcept>
 #include <string>
 
-// What the network manager and the network threads do with a state, for a fake client.
+// What the network manager and the network threads do with a state, for a fake client: the server's own functions, the
+//  socket aside.
 struct CNetTestAccess
 {
-    // As CNetworkManager::acceptNewConnection with CNetState::init, without a socket.
+    // As CNetworkManager::acceptNewConnection with CNetState::init, without a socket: the state opens with a client
+    //  (CNetState::initClient), the client joins the list of the clients.
     static void Open(CNetState* pState, CNetStateTestSink* pSink, dword dwReportedVersion)
     {
         pState->_pUnitTestSink = pSink;
-        pState->m_iConnectionTimeMs = CSTime::GetMonotonicSysTimeMilli();
-        pState->m_reportedVersionNumber = dwReportedVersion;
         pState->m_peerAddress.SetAddrStr("127.0.0.1");
-        g_Serv.StatInc(SERV_STAT_CLIENTS);
-        pState->m_client = new CClient(pState);
-        pState->m_isReadClosed = false;
-        pState->m_isWriteClosed = false;
-        pState->m_isInUse = true;
-        g_NetworkManager.m_clients.InsertContentHead(pState->m_client);
+        pState->m_reportedVersionNumber = dwReportedVersion;
+        pState->initClient();
+        g_NetworkManager.m_clients.InsertContentHead(pState->getClient());
     }
 
-    // As CNetState::clear, then the garbage collection destroying the client: its char logs out, it leaves the list.
+    // As the network thread closing the connection: CNetState::clear, which schedules the deletion of the client.
     static void Close(CNetState* pState)
     {
-        pState->m_isReadClosed = true;
-        pState->m_isWriteClosed = true;
-        CClient* pClient = pState->m_client;
-        delete pClient;
-        pState->m_client = nullptr;
-        g_Serv.StatDec(SERV_STAT_CLIENTS);
-        pState->m_isInUse = false;
+        pState->clear();
         pState->_pUnitTestSink = nullptr;
     }
 
-    // As CNetworkInput::processData, for the bytes of a tick before the decryption. False if the input refuses them: the
-    //  network thread then closes the connection.
+    // As the network input, for the bytes of a tick before the decryption (CNetworkInput::processRawData). False if it
+    //  refuses them: the connection is then closed.
     static bool ProcessRaw(CNetState* pState, Packet* pBuffer)
     {
         CNetworkInput input;
-        while (pBuffer->getRemainingLength() > 0)
-        {
-            if (!input.processData(pState, pBuffer))
-                return false;
-        }
-        return true;
+        return input.processRawData(pState, pBuffer);
+    }
+
+    // As the network input after the decryption (CNetworkInput::processGamePackets): the length left, not processed.
+    static uint ProcessGamePackets(CNetState* pState, Packet* pData)
+    {
+        return CNetworkInput::processGamePackets(pState, pData, GetPackets());
+    }
+    static int GetPacketExceptions(const CNetState* pState)
+    {
+        return pState->m_packetExceptions;
+    }
+
+    // As the network output: the state takes the packet (CNetState::canReceive, the socket aside), then the checks before
+    //  it's sent (CNetworkOutput::checkPacketSend).
+    static bool CheckPacketSend(const CNetState* pState, CClient* pClient, PacketSend* pPacket)
+    {
+        return pState->acceptsPacket(pPacket) && CNetworkOutput::checkPacketSend(pClient, pPacket);
+    }
+
+    // CClient::LogIn with the account: its checks, f_onaccount_login, CAccount::OnLogin.
+    static byte LogIn(CClient* pClient, CAccount* pAccount, CSString& sMsg)
+    {
+        return pClient->LogIn(pAccount, sMsg);
     }
 
     static const PacketManager& GetPackets()
@@ -81,9 +93,11 @@ CFakeClient::CFakeClient(dword dwReportedVersion) :
 
 CFakeClient::~CFakeClient()
 {
-    CNetTestAccess::Close(_pState.get());
-    // As the server: the account deletes its chars (Delete, with what they carry), then the end of the tick destroys them.
+    // As the server: the connection closes, and the end of the tick destroys the client (its char logs out) with the
+    //  objects the test deleted. Then the account deletes its chars (Delete, with what they carry), destroyed in turn.
     //  CAccounts::Account_Delete takes the account out of the list, without destroying it.
+    CNetTestAccess::Close(_pState.get());
+    CWorldTestAccess::DestroyScheduledDeletions();
     g_Accounts.Account_Delete(_pAccount);
     delete _pAccount;
     CWorldTestAccess::DestroyScheduledDeletions();
@@ -102,10 +116,12 @@ CChar* CFakeClient::GetChar() const noexcept
 
 void CFakeClient::LoginAccount()
 {
+    // The login message sets the connection type (CCrypto), then the account logs in.
     CClient* pClient = GetClient();
     pClient->SetConnectType(CONNECT_GAME);
-    pClient->m_pAccount = _pAccount;
-    _pAccount->OnLogin(pClient);
+    CSString sMsg;
+    if (CNetTestAccess::LogIn(pClient, _pAccount, sMsg) != PacketLoginError::Success)
+        throw std::runtime_error(std::string("CFakeClient::LoginAccount: the login was refused: ") + sMsg.GetBuffer());
 }
 
 CChar* CFakeClient::Login(const CPointMap& pt, CREID_TYPE id)
@@ -120,42 +136,26 @@ CChar* CFakeClient::Login(const CPointMap& pt, CREID_TYPE id)
     pChar->SetName(_pAccount->GetName());
     if (!pChar->SetPlayerAccount(_pAccount) || !pChar->MoveToChar(pt))
         throw std::runtime_error("CFakeClient::Login: the char wasn't placed in the world");
-    pClient->addPlayerStart(pChar);
+    if (pClient->Setup_Start(pChar) != PacketLoginError::Success)
+        throw std::runtime_error("CFakeClient::Login: the char's login was refused (@Login)");
     return pChar;
 }
 
 void CFakeClient::Receive(const std::vector<byte>& vData)
 {
-    // As CNetworkInput::processGameClientData, after the decryption. An unknown packet, or one shorter than its length,
-    //  is an error of the test: the server would discard the data, or wait for more.
-    const PacketManager& packets = CNetTestAccess::GetPackets();
+    // An unknown packet first, data ending in a packet shorter than its length, or an exception in a handler, is an error
+    //  of the test: the server would discard the data, wait for more, or log the exception and go on (too many disconnect
+    //  the client).
+    if (vData.empty() || (CNetTestAccess::GetPackets().getHandler(vData[0]) == nullptr))
+        throw std::invalid_argument("CFakeClient::Receive: no handler for packet " + (vData.empty() ? std::string("(none)") : std::to_string(vData[0])));
+
     Packet packet(vData.data(), uint(vData.size()));
-    uint uiRemaining = packet.getRemainingLength();
-    while ((uiRemaining > 0) && !_pState->isClosing())
-    {
-        const byte bId = packet.getRemainingData()[0];
-        Packet* pHandler = packets.getHandler(bId);
-        if (pHandler == nullptr)
-            throw std::invalid_argument("CFakeClient::Receive: no handler for packet " + std::to_string(bId));
-        const uint uiLength = pHandler->checkLength(_pState.get(), &packet);
-        if (uiLength == 0)
-            throw std::invalid_argument("CFakeClient::Receive: wrong length of packet " + std::to_string(bId));
-        uiRemaining -= uiLength;
-
-        // The packet filters of the scripts can skip it.
-        if (GetClient()->xPacketFilter(packet.getRemainingData(), uiLength))
-        {
-            packet.skip(int(uiLength));
-            continue;
-        }
-
-        pHandler->seek();
-        pHandler->writeData(packet.getRemainingData(), uiLength);
-        packet.skip(int(uiLength));
-        pHandler->resize(uiLength);
-        pHandler->seek(1);
-        pHandler->onReceive(_pState.get());
-    }
+    const int iExceptions = CNetTestAccess::GetPacketExceptions(_pState.get());
+    const uint uiRemaining = CNetTestAccess::ProcessGamePackets(_pState.get(), &packet);
+    if (CNetTestAccess::GetPacketExceptions(_pState.get()) != iExceptions)
+        throw std::runtime_error("CFakeClient::Receive: a packet handler threw an exception (logged)");
+    if ((uiRemaining > 0) && !_pState->isClosing())
+        throw std::invalid_argument("CFakeClient::Receive: the data ends in a packet shorter than its length");
 }
 
 int CFakeClient::GetPacketLength(byte bId) const
@@ -175,10 +175,12 @@ bool CFakeClient::ReceiveRaw(const std::vector<byte>& vData)
 
 void CFakeClient::OnPacketSent(PacketSend* pPacket)
 {
-    // As CNetworkOutput: the packet is prepared for the client (onSend, which can drop it), sent, then onSent.
+    // As the network output: the checks before the packet is sent (onSend can drop it, and the packet filters of the
+    //  scripts), then onSent. The output calls onSend once more as it takes the packet from the queue: a check, with no
+    //  side effects.
     const std::unique_ptr<PacketSend> pOwned(pPacket);
     CClient* pClient = GetClient();
-    if ((pClient == nullptr) || !pOwned->onSend(pClient))
+    if ((pClient == nullptr) || !CNetTestAccess::CheckPacketSend(_pState.get(), pClient, pOwned.get()))
         return;
     const byte* pData = pOwned->getData();
     _vSent.emplace_back(pData, pData + pOwned->getLength());

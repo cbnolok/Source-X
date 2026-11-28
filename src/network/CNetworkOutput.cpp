@@ -382,6 +382,15 @@ bool CNetworkOutput::sendPacket(CNetState* state, PacketSend* packet)
 	return sendPacketData(state, packet);
 }
 
+bool CNetworkOutput::checkPacketSend(CClient* client, PacketSend* packet) // static
+{
+	// the packet's own check (it can be dropped), then the packet filters of the scripts
+	if (packet->onSend(client) == false)
+		return false;
+
+	return (client->xOutPacketFilter(packet->getData(), packet->getLength()) == false);
+}
+
 bool CNetworkOutput::sendPacketData(CNetState* state, PacketSend* packet)
 {
 	// send packet data to client
@@ -397,13 +406,7 @@ bool CNetworkOutput::sendPacketData(CNetState* state, PacketSend* packet)
 	xRecordPacket(client, packet, "server->client");
 
 	EXC_SET_BLOCK("send trigger");
-	if (packet->onSend(client) == false)
-	{
-		delete packet;
-		return true;
-	}
-
-	if (client->xOutPacketFilter(packet->getData(), packet->getLength()) == true)
+	if (checkPacketSend(client, packet) == false)
 	{
 		delete packet;
 		return true;

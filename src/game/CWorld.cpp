@@ -434,6 +434,13 @@ void CWorldThread::ScheduleSpecialObjDeletion(CSObjListRec* obj)
 	m_ObjSpecialDelete.InsertContentTail(obj);
 }
 
+void CWorldThread::DestroyScheduledObjs()
+{
+	ADDTOCALLSTACK("CWorldThread::DestroyScheduledObjs");
+	m_ObjDelete.ClearContainer(false);	// empty our list of objects to delete (this DOES delete the objects, thanks to the virtual destructors)
+	m_ObjSpecialDelete.ClearContainer();
+}
+
 bool CWorldThread::IsObjIdle(const CSObjContRec* obj) const noexcept
 {
 	return (obj->GetParent() == &m_ObjNew);
@@ -575,10 +582,7 @@ void CWorldThread::GarbageCollection_NewObjs()
 		m_ObjNew.ClearContainer(false);	// empty our list of unplaced objects (and delete the objects in the list)
 	}
 	if (fDestroyObjs)
-	{
-		m_ObjDelete.ClearContainer(false);	// empty our list of objects to delete (and delete the objects in the list)
-		m_ObjSpecialDelete.ClearContainer();
-	}
+		DestroyScheduledObjs();
 
 
 	// Clean up GM pages not linked to an valid char/account
@@ -1813,8 +1817,7 @@ void CWorld::_OnTick()
 	_Ticker.Tick();
 
 	EXC_SET_BLOCK("Delete objects");
-	m_ObjDelete.ClearContainer(false);	// clean up our delete list (this DOES delete the objects, thanks to the virtual destructors).
-	m_ObjSpecialDelete.ClearContainer();
+	DestroyScheduledObjs();
 
     const int64 iCurTime = _GameClock.GetCurrentTime().GetTimeRaw();
 

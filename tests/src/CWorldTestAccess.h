@@ -27,9 +27,10 @@ struct CWorldTestAccess
     {
         return g_World.m_ObjDelete.GetContentCount();
     }
+    // As at the end of a tick: those objects, and the special ones (the clients of the closed connections).
     static void DestroyScheduledDeletions()
     {
-        g_World.m_ObjDelete.ClearContainer(false);
+        g_World.DestroyScheduledObjs();
     }
 
     // What CWorld::GarbageCollection does (a world save too, with SAVEGARBAGECOLLECT), without changing the server mode.

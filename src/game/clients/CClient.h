@@ -914,6 +914,9 @@ public:
 	friend class CNetworkOutput;
 	friend class PacketCreate;
 	friend class PacketServerRelay;
+#ifdef UNIT_TESTING
+	friend struct CNetTestAccess;	// The fake clients of the unit tests: their account logs in (LogIn).
+#endif
 };
 
 
