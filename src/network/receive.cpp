@@ -549,6 +549,12 @@ bool PacketItemEquipReq::onReceive(CNetState* net)
 	client->ClearTargMode(); // done dragging.
 
 	CChar* target = targetSerial.CharFind();
+	if (target == nullptr)
+	{
+		// Not a char (before, it was used anyway: a crash).
+		client->Event_Item_Drop_Fail(item);
+		return true;
+	}
     bool fSuccess = false;
 
     // Check if player is sending wrong / forged layer.
@@ -561,7 +567,7 @@ bool PacketItemEquipReq::onReceive(CNetState* net)
         itemLayer = itemRealLayer;
     }
 
-    if (target && (itemLayer < LAYER_HORSE) && source->CanDress(target) && source->CanTouch(item))
+    if ((itemLayer < LAYER_HORSE) && source->CanDress(target) && source->CanTouch(item))
     {
        //if (target->CanCarry(item)) //Since Weight behavior rework, we want avoid don't be able to equip an item if overweight
             fSuccess = target->ItemEquip(item, source);
