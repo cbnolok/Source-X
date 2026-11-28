@@ -3155,6 +3155,28 @@ uint PacketVendorSellList::fillSellList(CClient* target, const CItemContainer* c
 	return count;
 }
 
+bool PacketVendorSellList::isSearched(const CItemContainer* container, const CItem* item) // static
+{
+	ADDTOCALLSTACK("PacketVendorSellList::isSearched");
+	// In that container, or in the searchable containers inside it. A container with something inside isn't listed:
+	//  its contents are.
+	if (container == nullptr || item == nullptr)
+		return false;
+	const CItemContainer* itemContainer = dynamic_cast<const CItemContainer*>(item);
+	if (itemContainer != nullptr && !itemContainer->IsContainerEmpty())
+		return false;
+
+	for (const CItemContainer* parent = dynamic_cast<const CItemContainer*>(item->GetContainer()); parent != nullptr;
+		parent = dynamic_cast<const CItemContainer*>(parent->GetContainer()))
+	{
+		if (parent == container)
+			return true;
+		if (!parent->IsSearchable())
+			return false;
+	}
+	return false;
+}
+
 
 /***************************************************************************
  *

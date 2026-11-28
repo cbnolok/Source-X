@@ -1171,7 +1171,8 @@ void CClient::Event_VendorBuy_Cheater( int iCode )
 		"Bad vendor UID",
 		"Bad item UID",
 		"Requested items out of stock",
-		"Total cost is too high"
+		"Total cost is too high",
+		"Item not sold by that vendor"
 	};
 
 	g_Log.Event(LOGL_WARN|LOGM_CHEAT, "%x:Cheater '%s' is submitting illegal buy packet (%s)\n", GetSocketID(), GetAccount()->GetName(), sm_BuyPacketCheats[iCode]);

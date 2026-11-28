@@ -1098,6 +1098,8 @@ class PacketVendorSellList : public PacketSend
 public:
 	PacketVendorSellList(const CChar* vendor);
 	uint fillSellList(CClient* target, const CItemContainer* container, CItemContainer* stock1, CItemContainer* stock2, int iConvertFactor);
+	// Whether fillSellList looks at that item, searching that container.
+	static bool isSearched(const CItemContainer* container, const CItem* item);
 };
 
 /***************************************************************************

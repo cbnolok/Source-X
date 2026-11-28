@@ -755,6 +755,11 @@ bool PacketVendorBuyReq::onReceive(CNetState* net)
 		return true;
 	}
 
+	// The items offered (CClient::addShopMenuBuy): those in the two stock containers of the vendor, not in the
+	//  containers inside them.
+	const CItem* pStock = vendor->LayerFind(LAYER_VENDOR_STOCK);
+	const CItem* pStockExtra = vendor->LayerFind(LAYER_VENDOR_EXTRA);
+
     VendorItem items[MAX_ITEMS_CONT] = {};
     const uint uiCountFromPacket = (packetLength - 8u) / 7u;
 	uint itemCount = minimum(uiCountFromPacket, g_Cfg.m_iContainerMaxItems);
@@ -784,6 +789,12 @@ bool PacketVendorBuyReq::onReceive(CNetState* net)
 		if (item == nullptr || item->IsValidSaleItem(true) == false)
 		{
 			client->Event_VendorBuy_Cheater(0x2);
+			return true;
+		}
+		const CObjBase* pContainer = item->GetContainer();
+		if ((pContainer == nullptr) || ((pContainer != pStock) && (pContainer != pStockExtra)))
+		{
+			client->Event_VendorBuy_Cheater(0x5);
 			return true;
 		}
 
@@ -1918,14 +1929,26 @@ bool PacketVendorSellReq::onReceive(CNetState* net)
 		}
 	}
 
+	// Only the items the sell list offers (PacketVendorSellList::fillSellList), from the backpack: the others of the
+	//  seller (equipped, in the bank box or a trade window...) are left out, as Event_VendorSell skips those it hasn't
+	//  anymore. Event_VendorSell checks the rest, and is also used for an item given to a vendor (being dragged).
+	const CItemContainer* pPack = seller->GetPack();
     VendorItem items[MAX_ITEMS_CONT] = {};
+	uint uiListed = 0;
 	for (uint i = 0; i < itemCount; ++i)
 	{
-		items[i].m_serial = CUID(readInt32());
-		items[i].m_vcAmount = readInt16();
+		const CUID uidItem(readInt32());
+		const word wAmount = readInt16();
+		const CItem* pItem = uidItem.ItemFind();
+		if ((pItem != nullptr) && !PacketVendorSellList::isSearched(pPack, pItem))
+			continue;
+
+		items[uiListed].m_serial = uidItem;
+		items[uiListed].m_vcAmount = wAmount;
+		++uiListed;
 	}
 
-	client->Event_VendorSell(vendor, items, itemCount);
+	client->Event_VendorSell(vendor, items, uiListed);
 	return true;
 }
 
