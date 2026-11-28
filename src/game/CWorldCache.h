@@ -11,6 +11,9 @@ class CWorldCache
 {
 	friend class CWorld;
 	friend class CWorldMap;
+#ifdef UNIT_TESTING
+	friend struct CWorldTestAccess;
+#endif
 
 	int64	_iTimeLastMapBlockCacheCheck;
 

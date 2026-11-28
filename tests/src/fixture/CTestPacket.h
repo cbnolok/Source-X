@@ -50,6 +50,11 @@ public:
             _vData.push_back((i < sv.size()) ? byte(sv[i]) : byte(0));
         return *this;
     }
+    // An ASCII string and its terminator.
+    CTestPacket& StringNull(std::string_view sv)
+    {
+        return String(sv, sv.size() + 1);
+    }
 
     std::vector<byte> Get() const
     {

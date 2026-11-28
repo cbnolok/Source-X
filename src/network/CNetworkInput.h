@@ -42,6 +42,10 @@ private:
     bool processUnknownClientData(CNetState* state, Packet* buffer);    // process data from an unknown client type
     bool processOtherClientData(CNetState* state, Packet* buffer);      // process data from a non-game client
     bool processGameClientData(CNetState* state, Packet* buffer);       // process data from a game client
+
+#ifdef UNIT_TESTING
+    friend struct CNetTestAccess;   // The fake clients of the unit tests.
+#endif
 };
 
 #endif // _INC_CNETWORKINPUT_H

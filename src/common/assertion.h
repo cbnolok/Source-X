@@ -10,6 +10,11 @@
 [[noreturn]]
 extern void Assert_Fail(const char * pExp, const char *pFile, long long llLine);
 
+#ifdef UNIT_TESTING
+// How many assertions failed since the start: the tests check that a handler, which catches them (EXC_CATCH), failed none.
+extern unsigned int Assert_GetFailures() noexcept;
+#endif
+
 #define ASSERT_ALWAYS(exp)  if ( !(exp) ) [[unlikely]] Assert_Fail(#exp, __FILE__, __LINE__)
 
 #if defined(STATIC_ANALYSIS)

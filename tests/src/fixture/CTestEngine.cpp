@@ -45,17 +45,24 @@ namespace
     // The client files the engine opens, without verdata.mul (the map files of map 0).
     constexpr VERFILE_TYPE kOpenedFiles[] = {VERFILE_MAP, VERFILE_STAIDX, VERFILE_STATICS, VERFILE_TILEDATA, VERFILE_MULTIIDX, VERFILE_MULTI};
 
-    // The tiledata entries of the items equipped by the server, as in the client files.
-    struct TiledataEquip
+    // The tiledata entries of the items the server creates by itself, as in the client files: the containers it equips,
+    //  the gold (stackable; weightless, as the 0.02 stones of a coin round to 0), and two floor tiles of the house designs
+    //  (flat): a floor, the dirt of the ground floor. The others weigh a stone and are a unit high.
+    struct TiledataItem
     {
         ITEMID_TYPE id;
         dword dwFlags;
         LAYER_TYPE layer;
+        byte uiWeight;
+        byte uiHeight;
     };
-    constexpr TiledataEquip kEquip[] = {
-        {ITEMID_BACKPACK, UFLAG1_EQUIP | UFLAG3_CONTAINER, LAYER_PACK},
-        {ITEMID_BANK_BOX, UFLAG1_EQUIP | UFLAG3_CONTAINER, LAYER_BANKBOX},
-        {ITEMID_VENDOR_BOX, UFLAG1_EQUIP | UFLAG3_CONTAINER, LAYER_VENDOR_STOCK},
+    constexpr TiledataItem kItems[] = {
+        {ITEMID_BACKPACK, UFLAG1_EQUIP | UFLAG3_CONTAINER, LAYER_PACK, 1, 1},
+        {ITEMID_BANK_BOX, UFLAG1_EQUIP | UFLAG3_CONTAINER, LAYER_BANKBOX, 1, 1},
+        {ITEMID_VENDOR_BOX, UFLAG1_EQUIP | UFLAG3_CONTAINER, LAYER_VENDOR_STOCK, 1, 1},
+        {ITEMID_GOLD_C1, UFLAG2_STACKABLE, LAYER_NONE, 0, 1},
+        {CTestEngine::kidFloorTile, UFLAG1_FLOOR, LAYER_NONE, 1, 0},
+        {ITEMID_DIRT_TILE, UFLAG1_FLOOR, LAYER_NONE, 1, 0},
     };
 
     // The definitions the server needs for any char: the skill class of the players, the containers and the gold, with
@@ -170,12 +177,14 @@ TYPE=t_gold
                 rec.m_weight = 1;
                 rec.m_height = 1;
                 Str_CopyLimitNull(rec.m_name, "item", sizeof(rec.m_name));
-                for (const TiledataEquip& equip : kEquip)
+                for (const TiledataItem& item : kItems)
                 {
-                    if (equip.id == ITEMID_TYPE(id))
+                    if (item.id == ITEMID_TYPE(id))
                     {
-                        rec.m_flags = equip.dwFlags;
-                        rec.m_layer = byte(equip.layer);
+                        rec.m_flags = item.dwFlags;
+                        rec.m_layer = byte(item.layer);
+                        rec.m_weight = item.uiWeight;
+                        rec.m_height = item.uiHeight;
                     }
                 }
                 WriteRecord(file, rec);

@@ -41,12 +41,23 @@ public:
     }
     CChar* GetChar() const noexcept;
 
+    // The account logs in, as after the game login (0x91) and before the char selection: the client is in game mode,
+    //  with no char.
+    void LoginAccount();
     // A new player char of the account enters the world at that point, as after the char selection: it's placed (logged
-    //  out), then CClient::addPlayerStart. The objects need a UID: call it in a CTestRunModeScope.
+    //  out), then CClient::addPlayerStart. The account logs in first if it isn't. The objects need a UID: call it in a
+    //  CTestRunModeScope.
     CChar* Login(const CPointMap& pt, CREID_TYPE id = CREID_MAN);
 
     // The client sends these bytes: one or more packets.
     void Receive(const std::vector<byte>& vData);
+    // The length of that packet, for this client, as the network input reads it: 0 for a packet of variable length (its
+    //  length follows the ID), -1 if the server has no handler for it.
+    int GetPacketLength(byte bId) const;
+
+    // The client sends these bytes before it's set up, as the network input receives them in a tick: the seed, the
+    //  first (encrypted) messages. False if the input refuses them, and the connection is closed.
+    bool ReceiveRaw(const std::vector<byte>& vData);
 
     // The packets the server sent, in order.
     const std::vector<std::vector<byte>>& GetSent() const noexcept

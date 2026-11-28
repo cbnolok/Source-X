@@ -19,6 +19,9 @@ extern class CUOMapList
     friend class  CWorld;
     friend class  CWorldMap;
     friend class  CServerMapBlock;
+#ifdef UNIT_TESTING
+    friend struct CWorldTestAccess;     // The unit tests change the settings of a map, and restore them.
+#endif
 
 protected:
     struct MapGeoData

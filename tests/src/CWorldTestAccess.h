@@ -3,6 +3,7 @@
 
 #include "../../src/game/CWorld.h"
 #include "../../src/game/CWorldGameTime.h"
+#include "../../src/game/uo_files/CUOMapList.h"
 #include <cstddef>
 
 // What the unit tests drive in g_World (a friend of CWorld, under UNIT_TESTING). Shared by the test files: one definition.
@@ -47,6 +48,21 @@ struct CWorldTestAccess
     static void InitMapCache()
     {
         g_World._Cache.Init();
+    }
+    static bool HasMapCache(int iMap)
+    {
+        return bool(g_World._Cache._mapBlocks[iMap]);
+    }
+
+    // The settings of a map (MAPx= of the ini, then what CUOMapList::Init detects), to restore them after a test changed them.
+    using MapGeoData = CUOMapList::MapGeoData;
+    static MapGeoData GetMapGeoData(int iMap)
+    {
+        return g_MapList.m_mapGeoData.maps[iMap];
+    }
+    static void SetMapGeoData(int iMap, const MapGeoData& data)
+    {
+        g_MapList.m_mapGeoData.maps[iMap] = data;
     }
 };
 

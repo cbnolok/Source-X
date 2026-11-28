@@ -5,6 +5,7 @@
 #include "../../../src/game/clients/CAccount.h"
 #include "../../../src/game/clients/CClient.h"
 #include "../../../src/game/CServer.h"
+#include "../../../src/network/CNetworkInput.h"
 #include "../../../src/network/CNetworkManager.h"
 #include "../../../src/network/CPacketManager.h"
 #include <stdexcept>
@@ -39,6 +40,19 @@ struct CNetTestAccess
         g_Serv.StatDec(SERV_STAT_CLIENTS);
         pState->m_isInUse = false;
         pState->_pUnitTestSink = nullptr;
+    }
+
+    // As CNetworkInput::processData, for the bytes of a tick before the decryption. False if the input refuses them: the
+    //  network thread then closes the connection.
+    static bool ProcessRaw(CNetState* pState, Packet* pBuffer)
+    {
+        CNetworkInput input;
+        while (pBuffer->getRemainingLength() > 0)
+        {
+            if (!input.processData(pState, pBuffer))
+                return false;
+        }
+        return true;
     }
 
     static const PacketManager& GetPackets()
@@ -86,12 +100,19 @@ CChar* CFakeClient::GetChar() const noexcept
     return (pClient != nullptr) ? pClient->GetChar() : nullptr;
 }
 
-CChar* CFakeClient::Login(const CPointMap& pt, CREID_TYPE id)
+void CFakeClient::LoginAccount()
 {
     CClient* pClient = GetClient();
     pClient->SetConnectType(CONNECT_GAME);
     pClient->m_pAccount = _pAccount;
     _pAccount->OnLogin(pClient);
+}
+
+CChar* CFakeClient::Login(const CPointMap& pt, CREID_TYPE id)
+{
+    CClient* pClient = GetClient();
+    if (pClient->GetAccount() != _pAccount)
+        LoginAccount();
 
     CChar* pChar = CChar::CreateBasic(CTestEngine::CharDef(id));
     if (pChar == nullptr)
@@ -135,6 +156,21 @@ void CFakeClient::Receive(const std::vector<byte>& vData)
         pHandler->seek(1);
         pHandler->onReceive(_pState.get());
     }
+}
+
+int CFakeClient::GetPacketLength(byte bId) const
+{
+    Packet* pHandler = CNetTestAccess::GetPackets().getHandler(bId);
+    if (pHandler == nullptr)
+        return -1;
+    Packet packet;     // Read by none of the handlers: some lengths depend on the client version only.
+    return int(pHandler->getExpectedLength(_pState.get(), &packet));
+}
+
+bool CFakeClient::ReceiveRaw(const std::vector<byte>& vData)
+{
+    Packet buffer(vData.data(), uint(vData.size()));
+    return CNetTestAccess::ProcessRaw(_pState.get(), &buffer);
 }
 
 void CFakeClient::OnPacketSent(PacketSend* pPacket)

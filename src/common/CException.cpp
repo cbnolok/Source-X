@@ -1,5 +1,8 @@
 
 //#include "CException.h" // included in the precompiled header
+#ifdef UNIT_TESTING
+#include <atomic>
+#endif
 
 #ifdef WINDOWS_SHOULD_EMIT_CRASH_DUMP
 #include "crashdump/crashdump.h"
@@ -209,9 +212,21 @@ bool CWinStructuredException::GetErrorMessage(lptstr lpszError, uint uiMaxError)
 // --------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------
 
+#ifdef UNIT_TESTING
+static std::atomic<unsigned int> s_uiAssertFailures{0};
+
+unsigned int Assert_GetFailures() noexcept
+{
+	return s_uiAssertFailures.load(std::memory_order_relaxed);
+}
+#endif
+
 [[noreturn]]
 void Assert_Fail( lpctstr pExp, lpctstr pFile, long long llLine )
 {
+#ifdef UNIT_TESTING
+	s_uiAssertFailures.fetch_add(1, std::memory_order_relaxed);
+#endif
 	EXC_NOTIFY_DEBUGGER;
 	throw CAssert(LOGL_CRIT, pExp, pFile, llLine);
 }
